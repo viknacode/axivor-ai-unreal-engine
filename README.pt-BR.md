@@ -5,6 +5,12 @@
 <h1 align="center">Axivor AI</h1>
 
 <p align="center">
+  <img alt="Unreal Engine 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.8-0e1128?logo=unrealengine&logoColor=white">
+  <img alt="Plataforma Win64" src="https://img.shields.io/badge/plataforma-Win64-8b7cf6">
+  <img alt="Servidor MCP" src="https://img.shields.io/badge/MCP-servidor-8b7cf6">
+</p>
+
+<p align="center">
   <b>Um copiloto de engenharia que vive dentro do editor da Unreal Engine 5.8.</b><br>
   Descreva o que você quer; o Axivor constrói, edita, verifica e depura Blueprints, C++, níveis, animação, materiais e mais — com você, dentro do editor, usando as APIs reais da engine.
 </p>
