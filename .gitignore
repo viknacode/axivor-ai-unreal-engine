@@ -1,0 +1,18 @@
+# Unreal build output — rebuilt from Source by the editor / UBT
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+# Local scratch
+*.log
+*.tmp
+*.bak
+.vs/
+.idea/
+*.suo
+*.user
+
+# Never commit local credentials or session state
+**/settings.ini
+**/session_token.txt

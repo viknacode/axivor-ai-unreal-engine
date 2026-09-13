@@ -1,0 +1,27 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Packaging",
+  "display_name": "Packaging & Build",
+  "description": "Package/cook the project through UnrealAutomationTool (BuildCookRun), inspect packaging settings and target platforms, validate the setup before a build, and poll a running package job's log for errors. The ship loop that composes with git_tools and play_test.",
+  "category": "Build",
+  "catalog_blurb": "Package/cook via UAT, validate setup, poll build logs.",
+  "required_module_name": "UECPPackagingExt",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "packaging"
+  ],
+  "owned_tools": [
+    "get_packaging_settings",
+    "list_target_platforms",
+    "validate_packaging_setup",
+    "package_project",
+    "get_packaging_status"
+  ],
+  "umbrella_docs": {
+    "packaging": "Docs/packaging.md"
+  }
+}

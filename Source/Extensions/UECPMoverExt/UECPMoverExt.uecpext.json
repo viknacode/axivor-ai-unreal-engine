@@ -1,0 +1,36 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Mover",
+  "display_name": "Mover 2.0",
+  "description": "Tools for authoring characters with Mover 2.0 — Epic's experimental replacement for CharacterMovementComponent. Requires the Mover plugin. (Physics-based Chaos Mover lives in the separate 'Chaos Mover' extension.)",
+  "category": "Game Systems",
+  "catalog_blurb": "Mover 2.0 character movement components and modes.",
+  "required_module_name": "UECPMoverExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [
+    "Mover"
+  ],
+  "required_extensions": [
+    "Blueprint"
+  ],
+  "owned_umbrellas": [
+    "mover"
+  ],
+  "owned_tools": [
+    "setup_mover_character",
+    "configure_mover_settings",
+    "configure_stance_settings",
+    "add_movement_mode",
+    "remove_movement_mode",
+    "set_starting_movement_mode",
+    "configure_mover_component",
+    "get_mover_summary",
+    "configure_movement_mode"
+  ],
+  "umbrella_docs": {
+    "mover": "Docs/mover.uecpdat"
+  }
+}

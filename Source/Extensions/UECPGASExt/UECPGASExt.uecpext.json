@@ -1,0 +1,46 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "GAS",
+  "display_name": "Gameplay Ability System",
+  "description": "GAS authoring: ability creation + grant, attribute set + attribute authoring, gameplay effects (modifiers, duration, period, stacking, tags), gameplay cues, ability cost + cooldown setup, ability system component placement.",
+  "category": "Game Systems",
+  "catalog_blurb": "Abilities, attributes, effects, cues, AbilitySystemComponent.",
+  "required_module_name": "UECPGASExt",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [
+    "GameplayAbilities"
+  ],
+  "owned_umbrellas": [
+    "gas"
+  ],
+  "owned_tools": [
+    "add_gameplay_attribute",
+    "add_gameplay_effect_modifier",
+    "add_ability_system_component",
+    "set_ability_tags",
+    "set_gameplay_effect_duration",
+    "grant_ability_to_blueprint",
+    "set_gameplay_effect_stacking",
+    "set_gameplay_effect_period",
+    "set_ability_cost",
+    "set_ability_cooldown",
+    "get_gameplay_effect_summary",
+    "get_attribute_set_summary",
+    "remove_gameplay_effect_modifier",
+    "list_gameplay_abilities",
+    "set_gameplay_effect_tags",
+    "set_modifier_magnitude",
+    "set_ability_net_config",
+    "add_ability_trigger",
+    "gas_get_attribute_values",
+    "gas_get_active_effects",
+    "gas_get_granted_abilities",
+    "gas_get_active_tags"
+  ],
+  "umbrella_docs": {
+    "gas": "Docs/gas.uecpdat"
+  }
+}

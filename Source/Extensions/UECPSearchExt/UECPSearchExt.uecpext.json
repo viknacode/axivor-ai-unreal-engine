@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Search",
+  "display_name": "Web Search",
+  "description": "Web search and factual Q&A via Brave Search. Calls an external proxy — requires internet connectivity. Disabled by default; enable in Settings → Extensions when you want the AI to be able to look up docs, tutorials, or API references that it can't answer from the current tool surface.",
+  "category": "Utilities",
+  "catalog_blurb": "Web search and factual Q&A via Brave Search. Only used when current tools can't answer it.",
+  "required_module_name": "UECPSearchExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "search"
+  ],
+  "owned_tools": [
+    "web_search",
+    "answer"
+  ],
+  "umbrella_docs": {
+    "search": "Docs/search.uecpdat"
+  }
+}

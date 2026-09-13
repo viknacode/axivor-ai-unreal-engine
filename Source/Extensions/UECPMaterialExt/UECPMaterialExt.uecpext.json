@@ -1,0 +1,53 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Material",
+  "display_name": "Material",
+  "description": "Material asset authoring (create_material / create_material_instance / generate_pbr_material / create_material_from_textures), graph node editing (add/connect/disconnect/delete/move/duplicate/find/auto-layout), parameter inspection + reject-deprecated-aliases, material function + layer authoring, validation + compilation stats + import/export.",
+  "category": "Materials",
+  "catalog_blurb": "Materials, instances, functions, layers, graphs, validation.",
+  "required_module_name": "UECPMaterialExt",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "material"
+  ],
+  "owned_tools": [
+    "set_material_instance_parameter",
+    "get_material_instance_parameters",
+    "set_material_instance_static_switch",
+    "set_material_instance_parent",
+    "reset_material_instance_parameter",
+    "add_collection_parameter",
+    "set_collection_parameter_default",
+    "get_material_summary",
+    "list_material_node_types",
+    "create_material_from_textures",
+    "generate_pbr_material",
+    "add_material_node",
+    "connect_material_nodes",
+    "connect_material_nodes_bulk",
+    "delete_material_node",
+    "set_material_node_value",
+    "set_material_property",
+    "get_material_nodes",
+    "disconnect_material_pin",
+    "move_material_node",
+    "duplicate_material_node",
+    "auto_layout_material",
+    "find_material_node",
+    "get_material_graph_summary",
+    "set_material_parameters",
+    "add_material_parameter",
+    "set_material_parameter",
+    "validate_material",
+    "get_material_compilation_stats",
+    "export_material_graph",
+    "import_material_graph"
+  ],
+  "umbrella_docs": {
+    "material": "Docs/material.uecpdat"
+  }
+}

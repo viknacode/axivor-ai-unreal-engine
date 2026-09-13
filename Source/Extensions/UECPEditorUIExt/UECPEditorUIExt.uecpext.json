@@ -1,0 +1,36 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "EditorUI",
+  "display_name": "Editor UI Automation",
+  "description": "Drive the Unreal Editor UI programmatically: capture widget tree snapshots, click buttons, type into text inputs, select combo entries, drag widgets, and fill forms. Useful when no scripting API exists for a panel and the agent must operate the editor directly.",
+  "category": "Editor",
+  "catalog_blurb": "Editor UI Automation: snapshot, click, type, drag, fill forms on Slate widgets.",
+  "required_module_name": "UECPEditorUIExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "editor_ui"
+  ],
+  "owned_tools": [
+    "editor_ui_snapshot",
+    "editor_ui_observe",
+    "editor_ui_unobserve",
+    "editor_ui_list_observers",
+    "editor_ui_screenshot",
+    "editor_ui_click",
+    "editor_ui_hover",
+    "editor_ui_type",
+    "editor_ui_press_key",
+    "editor_ui_select_option",
+    "editor_ui_drag",
+    "editor_ui_windows",
+    "editor_ui_wait_for",
+    "editor_ui_fill_form"
+  ],
+  "umbrella_docs": {
+    "editor_ui": "Docs/editor_ui.uecpdat"
+  }
+}

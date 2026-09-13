@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "EngineToolsets",
+  "display_name": "Unreal 5.8 Native Toolsets",
+  "description": "Gives the AI every tool registered in the Unreal Engine 5.8 Toolset Registry (the same layer Epic's built-in Unreal MCP server exposes): scene/actor/material/object tools, editor app, UMG, PCG, Niagara, GAS, physics, Slate inspector, automation tests, semantic search, plugins, config settings, agent skills and more. Runs in-process, no HTTP server needed. Also exposes the File Sandbox so risky edits can be persisted or discarded as a batch.",
+  "category": "Engine",
+  "catalog_blurb": "All UE 5.8 native toolsets + File Sandbox, in-process.",
+  "required_module_name": "UECPEngineToolsetsExt",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "min_engine_version": "5.8",
+  "required_plugins": [
+    "ToolsetRegistry",
+    "AllToolsets",
+    "FileSandbox"
+  ],
+  "owned_umbrellas": [
+    "engine"
+  ],
+  "owned_tools": [
+    "engine_list_toolsets",
+    "engine_describe_toolset",
+    "engine_call_tool",
+    "engine_call_tool_result",
+    "engine_sandbox",
+    "engine_mcp_server"
+  ],
+  "umbrella_docs": {
+    "engine": "Docs/engine.md"
+  }
+}

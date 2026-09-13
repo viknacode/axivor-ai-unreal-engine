@@ -1,0 +1,30 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "GameFeatures",
+  "display_name": "Game Features Integration",
+  "description": "Tools for scaffolding Game Feature plugins, configuring AddComponents actions, and controlling activation state. Requires the GameFeatures and ModularGameplay plugins.",
+  "category": "Modular Gameplay",
+  "catalog_blurb": "Game Features Plugin: scaffold, component actions, activation state.",
+  "required_module_name": "UECPGameFeaturesExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [
+    "GameFeatures",
+    "ModularGameplay"
+  ],
+  "owned_umbrellas": [
+    "game_features"
+  ],
+  "owned_tools": [
+    "add_game_feature_action_add_components",
+    "add_game_feature_action",
+    "list_game_feature_actions",
+    "list_game_features",
+    "set_game_feature_state"
+  ],
+  "umbrella_docs": {
+    "game_features": "Docs/game_features.uecpdat"
+  }
+}

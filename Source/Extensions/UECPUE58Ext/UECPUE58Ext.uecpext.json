@@ -1,0 +1,37 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "UE58Features",
+  "display_name": "Unreal 5.8 Feature Pack",
+  "description": "Tools and guidance for the headline Unreal Engine 5.8 features: Procedural Vegetation Editor (Nanite-foliage trees from a node graph), Control Rig Physics & Dynamics, Direct Mesh Controls, MetaHuman (Mesh to MetaHuman, build, crowds), 5.8 rendering presets (MegaLights production, Lumen Lite, Substrate NPR, Fog Screen Space Scattering, Nanite Foliage), one-call Physics Asset generation for fast iteration, and Game Animation Sample (5.8) integration.",
+  "category": "Engine",
+  "catalog_blurb": "PVE, Control Rig Physics, DMC, MetaHuman, 5.8 rendering, Physics Asset, GASP.",
+  "required_module_name": "UECPUE58Ext",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "min_engine_version": "5.8",
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "ue58"
+  ],
+  "owned_tools": [
+    "ue58_feature_status",
+    "ue58_enable_plugins",
+    "pve_create_vegetation",
+    "pve_list_nodes",
+    "pve_open_editor",
+    "controlrig_physics_from_physics_asset",
+    "dmc_add_component",
+    "metahuman_api",
+    "render_apply_preset",
+    "render_set_cvars",
+    "render_get_state",
+    "physics_asset_generate",
+    "gasp_guide",
+    "gasp_add_character"
+  ],
+  "umbrella_docs": {
+    "ue58": "Docs/ue58.md"
+  }
+}

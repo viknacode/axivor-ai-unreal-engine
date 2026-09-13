@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Water",
+  "display_name": "Water",
+  "description": "Water bodies (river / lake / ocean), wave settings, water materials. Requires the Water plugin.",
+  "category": "World Building",
+  "catalog_blurb": "Water bodies and wave settings.",
+  "required_module_name": "UECPWaterExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [
+    "Water"
+  ],
+  "owned_umbrellas": [
+    "water"
+  ],
+  "owned_tools": [
+    "create_water_body_river",
+    "create_water_body_lake",
+    "create_water_body_ocean",
+    "set_water_material",
+    "set_water_wave_settings",
+    "get_water_body_info",
+    "set_water_body_properties",
+    "clear_water_waves",
+    "set_water_body_spline_points"
+  ],
+  "umbrella_docs": {
+    "water": "Docs/water.uecpdat"
+  }
+}

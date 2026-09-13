@@ -1,0 +1,34 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "GeometryScript",
+  "display_name": "Geometry Script",
+  "description": "Procedural mesh authoring with Geometry Script: append primitives, boolean ops, bake to static mesh. Requires the GeometryScripting plugin.",
+  "category": "World Building",
+  "catalog_blurb": "Geometry Script operations on dynamic meshes.",
+  "required_module_name": "UECPGeometryScriptExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [
+    "GeometryScripting"
+  ],
+  "owned_umbrellas": [
+    "geometry_script"
+  ],
+  "owned_tools": [
+    "spawn_dynamic_mesh_actor",
+    "append_box",
+    "append_sphere",
+    "append_cylinder",
+    "append_cone",
+    "copy_mesh_from_static_mesh",
+    "apply_boolean_operation",
+    "bake_to_static_mesh",
+    "clear_mesh",
+    "get_mesh_info"
+  ],
+  "umbrella_docs": {
+    "geometry_script": "Docs/geometry_script.uecpdat"
+  }
+}

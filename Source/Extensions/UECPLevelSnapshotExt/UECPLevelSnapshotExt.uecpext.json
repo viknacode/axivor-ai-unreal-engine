@@ -1,0 +1,30 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "LevelSnapshot",
+  "display_name": "Level Snapshots",
+  "description": "Capture, restore, compare, and selectively re-apply world state snapshots. Requires the LevelSnapshots plugin (virtual-production category).",
+  "category": "Cinematics",
+  "catalog_blurb": "Level snapshots: capture, restore, diff.",
+  "required_module_name": "UECPLevelSnapshotExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [
+    "LevelSnapshots"
+  ],
+  "owned_umbrellas": [
+    "level_snapshot"
+  ],
+  "owned_tools": [
+    "take_level_snapshot",
+    "restore_level_snapshot",
+    "list_level_snapshots",
+    "delete_level_snapshot",
+    "compare_snapshot_to_world",
+    "restore_specific_actors"
+  ],
+  "umbrella_docs": {
+    "level_snapshot": "Docs/level_snapshot.uecpdat"
+  }
+}

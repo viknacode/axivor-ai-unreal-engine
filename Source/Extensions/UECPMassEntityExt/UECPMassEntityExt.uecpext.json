@@ -1,0 +1,35 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "MassEntity",
+  "display_name": "Mass Entity",
+  "description": "Tools for authoring Mass Entity configs, traits, and spawners — Epic's experimental large-scale entity simulation framework. Requires the MassGameplay plugin.",
+  "category": "Game Systems",
+  "catalog_blurb": "Mass Entity framework: processors, traits, simulation.",
+  "required_module_name": "UECPMassEntityExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [
+    "MassGameplay"
+  ],
+  "owned_umbrellas": [
+    "mass_entity"
+  ],
+  "owned_tools": [
+    "add_mass_trait",
+    "set_mass_trait_property",
+    "get_mass_entity_config_summary",
+    "place_mass_spawner",
+    "configure_mass_spawner",
+    "add_mass_agent_component",
+    "list_mass_trait_classes",
+    "validate_mass_entity_config",
+    "remove_mass_trait",
+    "get_mass_spawner_summary",
+    "set_spawner_entity_types"
+  ],
+  "umbrella_docs": {
+    "mass_entity": "Docs/mass_entity.uecpdat"
+  }
+}

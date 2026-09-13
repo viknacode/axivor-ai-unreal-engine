@@ -1,0 +1,40 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Data",
+  "display_name": "Data",
+  "description": "User-defined data types: UStructs (create + add/remove/list members), UEnums (create + add/remove values), DataAssets (create + edit defaults + list types + get details), and DataTables (create + add/edit/get rows + import/export CSV). For string tables (localization) see the string_table umbrella; for curve assets see the curve umbrella.",
+  "category": "Data",
+  "catalog_blurb": "UStructs, UEnums, DataAssets, DataTables.",
+  "required_module_name": "UECPDataExt",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "data"
+  ],
+  "owned_tools": [
+    "edit_data_asset_defaults",
+    "get_data_asset_details",
+    "list_data_asset_types",
+    "add_data_table_rows",
+    "set_data_table_rows",
+    "delete_data_table_row",
+    "edit_data_table_rows",
+    "get_data_table_rows",
+    "import_data_table_csv",
+    "export_data_table_csv",
+    "add_enum_value",
+    "add_struct_member",
+    "add_struct_members",
+    "remove_enum_value",
+    "remove_struct_member",
+    "get_enum_values",
+    "get_struct_members",
+    "get_struct"
+  ],
+  "umbrella_docs": {
+    "data": "Docs/data.uecpdat"
+  }
+}

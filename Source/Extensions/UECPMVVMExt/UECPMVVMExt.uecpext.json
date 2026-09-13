@@ -1,0 +1,29 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "MVVM",
+  "display_name": "Model-View-ViewModel",
+  "description": "Authoring tools for the modern UMG binding system: create view models, FieldNotify properties, widget bindings. Requires the ModelViewViewModel plugin.",
+  "category": "UI",
+  "catalog_blurb": "Model-View-ViewModel: view models, FieldNotify fields, widget bindings.",
+  "required_module_name": "UECPMVVMExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [
+    "ModelViewViewModel"
+  ],
+  "owned_umbrellas": [
+    "mvvm"
+  ],
+  "owned_tools": [
+    "add_view_model_field",
+    "add_widget_view_model_context",
+    "remove_widget_view_model_context",
+    "add_widget_binding",
+    "list_widget_bindings"
+  ],
+  "umbrella_docs": {
+    "mvvm": "Docs/mvvm.uecpdat"
+  }
+}

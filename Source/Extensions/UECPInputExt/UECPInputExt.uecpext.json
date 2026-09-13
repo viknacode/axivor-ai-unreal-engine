@@ -1,0 +1,28 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Input",
+  "display_name": "Input",
+  "description": "Enhanced Input authoring: Input Action assets (value type, triggers, modifiers), Input Mapping Context assets, key bindings with triggers and modifiers, character mapping summary + setup helpers.",
+  "category": "Input",
+  "catalog_blurb": "Enhanced Input Actions, Mapping Contexts, key bindings.",
+  "required_module_name": "UECPInputExt",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "input_system"
+  ],
+  "owned_tools": [
+    "add_input_mapping",
+    "remove_input_mapping",
+    "get_input_mapping_summary",
+    "set_input_action_properties",
+    "get_input_action_summary",
+    "setup_enhanced_input"
+  ],
+  "umbrella_docs": {
+    "input_system": "Docs/input_system.uecpdat"
+  }
+}

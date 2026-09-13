@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Workflow",
+  "display_name": "Workflow Recipes",
+  "description": "Ordered build recipes per domain (gameplay ability, open world, locomotion, montage, retarget, motion matching, material, Niagara, UI, data, streaming, packaging, C++ class, MetaHuman, PVE tree...). Each step names the exact Axivor tool to call and the read-back that verifies it, so multi-step builds are decomposed consistently instead of improvised.",
+  "category": "Core",
+  "catalog_blurb": "Step-by-step recipes with verification per domain.",
+  "required_module_name": "UECPWorkflowExt",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "workflow"
+  ],
+  "owned_tools": [
+    "get_workflow",
+    "list_workflows"
+  ],
+  "umbrella_docs": {
+    "workflow": "Docs/workflow.md"
+  }
+}

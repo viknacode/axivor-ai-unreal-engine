@@ -1,0 +1,32 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "ChaosMover",
+  "display_name": "Chaos Mover",
+  "description": "Physics-based character movement built on Mover 2.0 — Epic's Chaos Mover. Adds a UChaosCharacterMoverComponent (auto-selects the Chaos physics backend with Walking/Falling/Flying modes) and tunes its shared physics settings. Requires UE 5.6+, the Mover + Chaos Mover plugins, and two project-wide physics settings (Project Settings > Engine - Physics: Tick Physics Async + Physics Prediction) — Chaos characters stay frozen until you enable those and restart the editor; the tools report this requirement but do not change project config for you. Per-mode physics tuning and mode add/remove reuse the 'mover' umbrella.",
+  "category": "Game Systems",
+  "catalog_blurb": "Physics-based Mover characters (Chaos Mover).",
+  "required_module_name": "UECPChaosMoverExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "min_engine_version": "5.6.0",
+  "required_plugins": [
+    "Mover",
+    "ChaosMover"
+  ],
+  "required_extensions": [
+    "Mover",
+    "Blueprint"
+  ],
+  "owned_umbrellas": [
+    "chaos_mover"
+  ],
+  "owned_tools": [
+    "setup_chaos_mover_character",
+    "configure_chaos_mover_settings"
+  ],
+  "umbrella_docs": {
+    "chaos_mover": "Docs/chaos_mover.uecpdat"
+  }
+}

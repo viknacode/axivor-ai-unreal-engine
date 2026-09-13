@@ -1,0 +1,49 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Cpp",
+  "display_name": "C++ Tooling",
+  "description": "First-class UE C++ authoring: type-aware UCLASS/USTRUCT/UENUM/UINTERFACE creation with correct MODULENAME_API + GENERATED_BODY + .generated.h placement, reflection-aware UPROPERTY/UFUNCTION/include inserts (no byte ranges from caller), .Build.cs dependency editing, header introspection, file read/write/edit with auto-fix of lowercase reflection macros, project compile, and native engine source search.",
+  "category": "Engineering",
+  "catalog_blurb": "UE C++ class authoring, reflection-aware edits, module/.Build.cs management, header summaries, project compile.",
+  "required_module_name": "UECPCppExt",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "cpp_tools"
+  ],
+  "owned_tools": [
+    "read_cpp_file",
+    "write_cpp_file",
+    "edit_cpp_file",
+    "check_project_source",
+    "compile_project",
+    "search_engine_source",
+    "search_engine_api",
+    "create_uclass",
+    "create_actor",
+    "create_actor_component",
+    "create_ustruct",
+    "create_uenum",
+    "create_uinterface",
+    "add_uproperty",
+    "add_ufunction",
+    "add_member",
+    "add_include",
+    "list_project_modules",
+    "edit_module_deps",
+    "create_plugin",
+    "add_plugin_module",
+    "add_plugin_dependency",
+    "create_uecp_extension",
+    "register_extension_tool",
+    "get_class_summary",
+    "find_class_definition"
+  ],
+  "umbrella_docs": {
+    "cpp_tools": "Docs/cpp_tools.uecpdat",
+    "uecp_extensions": "Docs/uecp_extensions.uecpdat"
+  }
+}

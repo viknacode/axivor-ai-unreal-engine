@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "World",
+  "display_name": "World Builder",
+  "description": "Open-world composition tools: zoned biome vegetation layers from presets with automatic building/road exclusion (composes populate_landscape per layer), spline roads and rivers (Water plugin used when available, spline-mesh fallback otherwise) with vegetation clearing and terrain flattening, grid snapping, surface alignment, prefab placement (Blueprints and Level Instances on points, grids or along splines), filtered mass edits (properties, transforms, materials, folders, tags) and direct landscape heightmap import, sculpting, layer painting and spline flattening.",
+  "category": "World Building",
+  "catalog_blurb": "Biomes, roads, rivers, snap/align, prefabs, mass edit, landscape import/sculpt/paint.",
+  "required_module_name": "UECPWorldExt",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "world"
+  ],
+  "owned_tools": [
+    "world_build_biome",
+    "world_build_road",
+    "world_build_river",
+    "world_snap_to_grid",
+    "world_align_to_surface",
+    "world_place_prefab",
+    "world_mass_edit",
+    "world_landscape_import_heightmap",
+    "world_landscape_sculpt",
+    "world_landscape_paint_layer",
+    "world_landscape_flatten_spline"
+  ],
+  "umbrella_docs": {
+    "world": "Docs/world.md"
+  }
+}

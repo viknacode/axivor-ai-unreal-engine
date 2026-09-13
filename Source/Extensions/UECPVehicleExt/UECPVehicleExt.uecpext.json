@@ -1,0 +1,30 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Vehicle",
+  "display_name": "Chaos Vehicles",
+  "description": "Vehicle blueprint authoring: wheels, engine, transmission, suspension, steering. Requires the ChaosVehiclesPlugin.",
+  "category": "Vehicles",
+  "catalog_blurb": "Chaos Vehicle blueprints: wheels, engine, transmission, suspension.",
+  "required_module_name": "UECPVehicleExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [
+    "ChaosVehiclesPlugin"
+  ],
+  "owned_umbrellas": [
+    "vehicle"
+  ],
+  "owned_tools": [
+    "add_vehicle_wheel",
+    "set_vehicle_engine_config",
+    "set_vehicle_transmission_config",
+    "set_vehicle_suspension_config",
+    "set_vehicle_steering_config",
+    "get_vehicle_config_summary"
+  ],
+  "umbrella_docs": {
+    "vehicle": "Docs/vehicle.uecpdat"
+  }
+}

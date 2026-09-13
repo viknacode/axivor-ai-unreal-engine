@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Axivor AI</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   AXIVOR AI — Welcome / announcement window
+   Bridge contract (unchanged): initWelcome(json) · initAnnouncement(json) ·
+   setLanguage(code) · navigation to ue://welcome/{close|dismiss/x|openurl/x|setlanguage/x}
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root{
+  --bg:#0a0d14;--bg2:#0f131c;--bg3:#151a25;--bg4:#1c2230;
+  --hair:rgba(148,163,184,.14);--input:#0c1018;
+  --accent:#8b7cf6;--accent2:#8b7cf6;
+  --text:#eef2f7;--text2:#9aa6b8;--text3:#5b6675;
+  --grad:var(--accent);
+  --grad-soft:rgba(139,124,246,.14);
+  --font:'Segoe UI Variable Text','Segoe UI Variable','Inter','Segoe UI',system-ui,-apple-system,sans-serif;
+  --font-display:'Segoe UI Variable Display','Segoe UI Variable','Inter','Segoe UI',system-ui,-apple-system,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  background:var(--bg);
+  color:var(--text);font-family:var(--font);font-size:13.5px;line-height:1.6;
+  overflow-y:auto;overflow-x:hidden;-webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;min-height:100%;
+}
+::-webkit-scrollbar{width:7px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(148,163,184,.18);border-radius:8px}
+::-webkit-scrollbar-thumb:hover{background:rgba(148,163,184,.32)}
+
+.header{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid var(--hair);background:rgba(15,19,28,.7);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);position:sticky;top:0;z-index:10}
+.brand{display:flex;align-items:center;gap:11px}
+.brand svg{width:30px;height:30px;filter:drop-shadow(0 0 10px rgba(139,124,246,.5))}
+.brand-name{font-family:var(--font-display);font-weight:800;font-size:15px;letter-spacing:.08em;text-transform:uppercase;line-height:1}
+.brand-name b{color:var(--accent)}
+.brand-sub{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--text3);font-weight:600;margin-top:4px}
+.version{display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;border:1px solid var(--hair);background:rgba(255,255,255,.04);font-size:10.5px;color:var(--text2);margin-left:10px;letter-spacing:.06em}
+.header-right{display:flex;align-items:center;gap:8px}
+.lang-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;font-weight:600}
+.lang-select{background:var(--input);border:1px solid var(--hair);color:var(--text);padding:6px 10px;border-radius:9px;font-size:11px;cursor:pointer;outline:none}
+
+.hero{padding:34px 36px 8px;text-align:center;max-width:720px;margin:0 auto}
+.hero-mark{width:84px;height:84px;margin:0 auto 16px;border-radius:26px;background:var(--grad-soft);border:1px solid rgba(139,124,246,.28);display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1px rgba(139,124,246,.15),0 24px 60px -24px rgba(139,124,246,.6);position:relative}
+.hero-mark::after{display:none}
+.hero-mark svg{width:52px;height:52px}
+.hero h1{font-family:var(--font-display);font-size:28px;font-weight:800;letter-spacing:-.01em;line-height:1.15;margin-bottom:8px}
+.hero h1 b{color:var(--accent)}
+.hero p.lead{color:var(--text2);font-size:14px;max-width:560px;margin:0 auto}
+
+.content{padding:18px 36px 8px;max-width:720px;margin:0 auto;width:100%}
+.content p{margin-bottom:12px;color:var(--text2)}
+.content strong{color:var(--text)}
+.content h2{color:var(--text);font-family:var(--font-display);font-size:18px;margin-bottom:8px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0 6px}
+.feat{border:1px solid var(--hair);border-radius:14px;padding:14px 16px;background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,0)),var(--bg3);position:relative;overflow:hidden;transition:transform .18s cubic-bezier(.2,.8,.2,1),border-color .18s}
+.feat::before{content:'';position:absolute;left:0;right:0;top:0;height:2px;background:var(--grad);opacity:0;transition:opacity .18s}
+.feat:hover{transform:translateY(-2px);border-color:rgba(139,124,246,.35)}
+.feat:hover::before{opacity:1}
+.feat .ic{width:32px;height:32px;border-radius:9px;background:var(--grad-soft);border:1px solid rgba(139,124,246,.22);display:flex;align-items:center;justify-content:center;color:var(--accent);margin-bottom:10px}
+.feat .ic svg{width:16px;height:16px}
+.feat h3{font-size:13.5px;font-weight:700;margin-bottom:3px;color:var(--text)}
+.feat p{font-size:12px;color:var(--text2);margin:0;line-height:1.5}
+
+.buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 36px 10px;max-width:720px;margin:0 auto;width:100%}
+.buttons:empty{display:none}
+.btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:11px 16px;border:1px solid var(--hair);border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .15s;background:rgba(255,255,255,.03);color:var(--text);font-family:inherit}
+.btn:hover{border-color:rgba(139,124,246,.4);background:rgba(139,124,246,.08);transform:translateY(-1px)}
+.btn-primary,.btn-cyan{background:var(--grad);color:#fff;border-color:transparent;box-shadow:0 10px 24px -12px rgba(139,124,246,.7)}
+.btn-primary:hover,.btn-cyan:hover{filter:brightness(1.08);background:var(--grad)}
+
+.footer{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 36px 18px;border-top:1px solid var(--hair);max-width:720px;margin-left:auto;margin-right:auto;width:100%}
+.checkbox-row{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text2)}
+.checkbox-row input{accent-color:var(--accent);width:14px;height:14px}
+.close-btn{background:var(--grad);color:#fff;border:none;padding:9px 22px;border-radius:10px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 10px 24px -12px rgba(139,124,246,.7)}
+.close-btn:hover{filter:brightness(1.08)}
+.kbd{display:inline-flex;padding:1px 6px;border-radius:5px;border:1px solid var(--hair);background:rgba(255,255,255,.04);font-family:Consolas,monospace;font-size:10.5px;color:var(--accent2)}
+
+body.announcement .hero-mark{display:none}
+body.announcement .hero h1{font-size:22px}
+
+/* Custom select (prevents CEF popup crash) */
+.cs-wrap{position:relative;display:inline-block}
+.cs-display{background:var(--input);border:1px solid var(--hair);color:var(--text);padding:6px 26px 6px 10px;border-radius:9px;font-size:11px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238b7cf6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;transition:box-shadow .2s,border-color .2s;user-select:none}
+.cs-display:hover,.cs-display.open{border-color:rgba(139,124,246,.5);box-shadow:0 0 0 3px rgba(139,124,246,.14)}
+.cs-list{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:99999;background:var(--bg3);border:1px solid var(--hair);border-radius:10px;max-height:220px;overflow-y:auto;box-shadow:0 18px 50px -20px rgba(0,0,0,.8)}
+.cs-list.open{display:block}
+.cs-item{padding:7px 10px;cursor:pointer;font-size:11px;color:var(--text2);transition:background .1s,color .1s}
+.cs-item:hover{background:rgba(255,255,255,.06);color:var(--text)}
+.cs-item.cs-sel{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="brand">
+    <svg viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b7cf6"/><stop offset="1" stop-color="#8b7cf6"/></linearGradient></defs><path d="M21 78 L49 22 M79 78 L51 22" stroke="url(#g1)" stroke-width="15" stroke-linecap="round" fill="none"/><path d="M22 74 A36 36 0 0 0 78 74" stroke="url(#g1)" stroke-width="6.5" stroke-linecap="round" fill="none"/><circle cx="50" cy="60" r="6" fill="#fff"/></svg>
+    <div>
+      <div class="brand-name">Axivor <b>AI</b><span class="version" id="version-badge">v1.0</span></div>
+      <div class="brand-sub">Unreal Engine copilot</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="lang-label">Language</span>
+    <select class="lang-select" id="lang-select" onchange="onLangChange(this.value)">
+      <option value="en">EN — English</option>
+      <option value="pt">PT — Português</option>
+      <option value="es">ES — Español</option>
+      <option value="fr">FR — Français</option>
+      <option value="de">DE — Deutsch</option>
+      <option value="it">IT — Italiano</option>
+      <option value="zh">CN — 中文</option>
+      <option value="ja">JP — 日本語</option>
+      <option value="ko">KR — 한국어</option>
+      <option value="ru">RU — Русский</option>
+      <option value="ar">AR — العربية</option>
+      <option value="nl">NL — Nederlands</option>
+      <option value="tr">TR — Türkçe</option>
+      <option value="pl">PL — Polski</option>
+      <option value="vi">VI — Tiếng Việt</option>
+      <option value="id">ID — Indonesia</option>
+      <option value="hi">HI — हिन्दी</option>
+      <option value="ro">RO — Română</option>
+      <option value="th">TH — ไทย</option>
+      <option value="uk">UK — Українська</option>
+    </select>
+  </div>
+</div>
+
+<div class="hero" id="hero">
+  <div class="hero-mark"><svg viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="g2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b7cf6"/><stop offset="1" stop-color="#8b7cf6"/></linearGradient></defs><path d="M21 78 L49 22 M79 78 L51 22" stroke="url(#g2)" stroke-width="15" stroke-linecap="round" fill="none"/><path d="M22 74 A36 36 0 0 0 78 74" stroke="url(#g2)" stroke-width="6.5" stroke-linecap="round" fill="none"/><circle cx="50" cy="60" r="6" fill="#fff"/></svg></div>
+  <h1 id="hero-title">Bem-vindo ao <b>Axivor AI</b></h1>
+  <p class="lead" id="hero-lead">Seu copiloto de engenharia dentro do Unreal Engine.</p>
+</div>
+
+<div class="content" id="body-content"></div>
+<div class="buttons" id="cta-buttons"></div>
+
+<div class="footer">
+  <label class="checkbox-row" id="dismiss-row">
+    <input type="checkbox" id="dismiss-check">
+    <span id="dismiss-label">Não mostrar novamente</span>
+  </label>
+  <button class="close-btn" id="close-btn" onclick="doClose()">Começar</button>
+</div>
+
+<script>
+var _data = null;
+var _lang = 'en';
+var _mode = 'welcome';
+
+var _dismissLabels = {
+  en:"Don't show this again", es:"No mostrar de nuevo", fr:"Ne plus afficher",
+  de:"Nicht mehr anzeigen", zh:"不再显示", ja:"今後表示しない",
+  ru:"Больше не показывать", pt:"Não mostrar novamente", ko:"다시 표시하지 않기",
+  it:"Non mostrare più", ar:"عدم الإظهار مجدداً", nl:"Niet meer tonen",
+  tr:"Bir daha gösterme", pl:"Nie pokazuj ponownie", vi:"Không hiển thị lại",
+  id:"Jangan tampilkan lagi", hi:"फिर से न दिखाएं", ro:"Nu mai afisa",
+  th:"ไม่ต้องแสดงอีก", uk:"Більше не показувати"
+};
+var _closeLabels = { en:"Get started", pt:"Começar", es:"Empezar", fr:"Commencer", de:"Loslegen", it:"Inizia" };
+var _titles = {
+  en:"Welcome to <b>Axivor AI</b>", pt:"Bem-vindo ao <b>Axivor AI</b>", es:"Bienvenido a <b>Axivor AI</b>",
+  fr:"Bienvenue dans <b>Axivor AI</b>", de:"Willkommen bei <b>Axivor AI</b>", it:"Benvenuto in <b>Axivor AI</b>"
+};
+var _leads = {
+  en:"Your engineering copilot inside Unreal Engine.", pt:"Seu copiloto de engenharia dentro do Unreal Engine.",
+  es:"Tu copiloto de ingeniería dentro de Unreal Engine.", fr:"Votre copilote d'ingénierie dans Unreal Engine.",
+  de:"Dein Engineering-Copilot in der Unreal Engine.", it:"Il tuo copilota di ingegneria dentro Unreal Engine."
+};
+
+function ic(p){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg>'; }
+var _feat = {
+  en:[
+    ['Architect','Describe what you want and Axivor builds, edits and debugs Blueprints, C++ and assets with you.'],
+    ['Project Scanner','Index your project and ask anything about its assets, dependencies and performance.'],
+    ['Crew','Autonomous multi-agent runs that plan, execute and hand off work between roles.'],
+    ['Tools & MCP','Mesh splitter, image and 3D generation, profiler, and an MCP server for external agents.']
+  ],
+  pt:[
+    ['Architect','Descreva o que quer e o Axivor constrói, edita e depura Blueprints, C++ e assets com você.'],
+    ['Project Scanner','Indexe o projeto e pergunte qualquer coisa sobre assets, dependências e desempenho.'],
+    ['Crew','Execuções autônomas com vários agentes que planejam, executam e passam o trabalho entre papéis.'],
+    ['Tools & MCP','Divisor de meshes, geração de imagens e 3D, profiler e um servidor MCP para agentes externos.']
+  ]
+};
+var _icons = [
+  ic('<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/>'),
+  ic('<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>'),
+  ic('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
+  ic('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>')
+];
+function featureGrid(lang){
+  var f = _feat[lang] || _feat.en, h = '<div class="grid">';
+  for (var i = 0; i < f.length; i++) h += '<div class="feat"><div class="ic">'+_icons[i]+'</div><h3>'+f[i][0]+'</h3><p>'+f[i][1]+'</p></div>';
+  h += '</div>';
+  h += '<p style="text-align:center;margin-top:14px;font-size:12px;color:var(--text3)"><span class="kbd">Ctrl</span> + <span class="kbd">K</span> '+(lang==='pt'?'abre a paleta de comandos a qualquer momento.':'opens the command palette at any time.')+'</p>';
+  return h;
+}
+
+/* Built-in welcome content (used for the welcome mode; remote content is only used for announcements). */
+var _fallbackData = { version:"2.0", body_html_en:"", cta_buttons:[] };
+
+function initWelcome(json) {
+  _mode = 'welcome';
+  _data = _fallbackData;
+  render();
+}
+function initAnnouncement(json) {
+  _mode = 'announcement';
+  document.body.classList.add('announcement');
+  try { _data = typeof json === 'string' ? JSON.parse(json) : json; } catch(e) { return; }
+  render();
+}
+function setLanguage(code) {
+  _lang = code;
+  var sel = document.getElementById('lang-select');
+  if (sel) sel.value = code;
+  render();
+}
+function render() {
+  if (!_data) return;
+  var title = document.getElementById('hero-title'), lead = document.getElementById('hero-lead');
+  if (_mode === 'welcome') {
+    if (title) title.innerHTML = _titles[_lang] || _titles.en;
+    if (lead) lead.textContent = _leads[_lang] || _leads.en;
+    document.getElementById('body-content').innerHTML = featureGrid(_lang);
+  } else {
+    var t = _data['title_' + _lang] || _data['title_en'] || _data.title || 'Axivor AI';
+    if (title) title.innerHTML = t;
+    if (lead) lead.textContent = '';
+    document.getElementById('body-content').innerHTML = _data['body_html_' + _lang] || _data['body_html_en'] || '';
+  }
+  var btns = _data.cta_buttons || [], btnHtml = '';
+  for (var i = 0; i < btns.length; i++) {
+    var b = btns[i], label = b['label_' + _lang] || b['label_en'] || '';
+    var cls = b.style === 'primary' ? 'btn btn-primary' : b.style === 'cyan' ? 'btn btn-cyan' : 'btn';
+    btnHtml += '<button class="' + cls + '" onclick="openUrl(\'' + (b.url||'').replace(/'/g,"\\'") + '\')">' + label + '</button>';
+  }
+  document.getElementById('cta-buttons').innerHTML = btnHtml;
+  var dl = document.getElementById('dismiss-label'); if (dl) dl.textContent = _dismissLabels[_lang] || _dismissLabels.en;
+  var cb = document.getElementById('close-btn'); if (cb) cb.textContent = _closeLabels[_lang] || _closeLabels.en;
+  var vb = document.getElementById('version-badge'); if (vb && _data.version && _mode !== 'welcome') vb.textContent = 'v' + _data.version;
+}
+function sendCmd(path) { window.location.href = 'ue://welcome/' + path; }
+function onLangChange(code) { _lang = code; render(); sendCmd('setlanguage/' + code); }
+function openUrl(url) { sendCmd('openurl/' + encodeURIComponent(url)); }
+function doClose() {
+  var dismissed = document.getElementById('dismiss-check').checked;
+  if (dismissed) {
+    var dismissKey = _mode === 'announcement' ? 'announcement:' + (_data.announcement_id || '') : 'welcome';
+    sendCmd('dismiss/' + dismissKey);
+  } else {
+    sendCmd('close');
+  }
+}
+setTimeout(function() { if (!_data) initWelcome(_fallbackData); }, 800);
+</script>
+<script>
+(function(){var proto=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value');function closeAll(x){document.querySelectorAll('.cs-list.open').forEach(function(l){if(l!==x){l.classList.remove('open');l.previousSibling.classList.remove('open');}});}function initSelect(sel){if(sel.dataset.cs)return;sel.dataset.cs='1';var wrap=document.createElement('div');wrap.className='cs-wrap';if(sel.style.cssText){wrap.style.cssText=sel.style.cssText;}sel.parentNode.insertBefore(wrap,sel);sel.style.cssText='display:none!important';wrap.appendChild(sel);var display=document.createElement('div');display.className='cs-display';display.setAttribute('tabindex','0');var list=document.createElement('div');list.className='cs-list';wrap.appendChild(display);wrap.appendChild(list);function refreshDisplay(){var cur=proto.get?proto.get.call(sel):sel.value;var opt=Array.from(sel.options).find(function(o){return o.value===cur;});display.textContent=opt?opt.text:(sel.options[0]?sel.options[0].text:'');}function buildAndOpen(){closeAll(list);list.innerHTML='';var cur=proto.get?proto.get.call(sel):sel.value;Array.from(sel.options).forEach(function(opt){var item=document.createElement('div');item.className='cs-item'+(opt.value===cur?' cs-sel':'')+(opt.disabled?' cs-disabled':'');item.textContent=opt.text;item.addEventListener('mousedown',function(e){e.preventDefault();e.stopPropagation();if(opt.disabled)return;if(proto.set)proto.set.call(sel,opt.value);else sel.value=opt.value;sel.dispatchEvent(new Event('change',{bubbles:true}));refreshDisplay();list.classList.remove('open');display.classList.remove('open');});list.appendChild(item);});list.classList.add('open');display.classList.add('open');}display.addEventListener('mousedown',function(e){e.preventDefault();e.stopPropagation();if(list.classList.contains('open')){list.classList.remove('open');display.classList.remove('open');}else buildAndOpen();});display.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();buildAndOpen();}if(e.key==='Escape'){list.classList.remove('open');display.classList.remove('open');}});Object.defineProperty(sel,'value',{get:function(){return proto.get?proto.get.call(this):this.getAttribute('value');},set:function(v){if(proto.set)proto.set.call(this,v);refreshDisplay();},configurable:true});new MutationObserver(refreshDisplay).observe(sel,{childList:true,subtree:true,attributes:true});refreshDisplay();}document.addEventListener('mousedown',function(e){if(!e.target.closest('.cs-wrap'))closeAll();});function initAll(){document.querySelectorAll('select:not([data-cs])').forEach(initSelect);}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initAll);else initAll();new MutationObserver(function(muts){muts.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType!==1)return;if(n.tagName==='SELECT')initSelect(n);else if(n.querySelectorAll)n.querySelectorAll('select:not([data-cs])').forEach(initSelect);});});}).observe(document.body,{childList:true,subtree:true});}());
+</script>
+</body>
+</html>

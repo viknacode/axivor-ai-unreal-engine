@@ -1,0 +1,26 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Media",
+  "display_name": "Media Framework",
+  "description": "Tools for media players, file/stream sources, media textures, and player-texture linking. Requires the MediaAssets / Media engine plugins.",
+  "category": "Hardware / IO",
+  "catalog_blurb": "Media player, textures, sources.",
+  "required_module_name": "UECPMediaExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "media"
+  ],
+  "owned_tools": [
+    "link_texture_to_player",
+    "set_media_player_properties",
+    "get_media_player_info",
+    "open_media_source"
+  ],
+  "umbrella_docs": {
+    "media": "Docs/media.uecpdat"
+  }
+}

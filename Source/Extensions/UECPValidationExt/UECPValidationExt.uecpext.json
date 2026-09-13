@@ -1,0 +1,27 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Validation",
+  "display_name": "Asset Validation",
+  "description": "Run the editor's Data Validation over one asset, a folder, or the whole project and get structured errors/warnings. The pre-flight companion to packaging — catch broken references and failing validators before a cook.",
+  "category": "Build",
+  "catalog_blurb": "Validate assets/maps and report errors before packaging.",
+  "required_module_name": "UECPValidationExt",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [
+    "DataValidation"
+  ],
+  "owned_umbrellas": [
+    "validation"
+  ],
+  "owned_tools": [
+    "validate_asset",
+    "validate_assets",
+    "validate_project"
+  ],
+  "umbrella_docs": {
+    "validation": "Docs/validation.md"
+  }
+}

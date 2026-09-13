@@ -1,0 +1,31 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "LiveLink",
+  "display_name": "Live Link",
+  "description": "Tools for managing Live Link sources, subjects, and presets — used in motion-capture and virtual-production workflows. Requires the LiveLink plugin.",
+  "category": "Hardware / IO",
+  "catalog_blurb": "Live Link sources, subjects, roles, presets.",
+  "required_module_name": "UECPLiveLinkExt",
+  "default_enabled": false,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [
+    "LiveLink"
+  ],
+  "owned_umbrellas": [
+    "live_link"
+  ],
+  "owned_tools": [
+    "add_message_bus_source",
+    "get_subject_frame_data",
+    "remove_live_link_source",
+    "list_live_link_sources",
+    "list_live_link_subjects",
+    "apply_live_link_preset",
+    "get_live_link_summary"
+  ],
+  "umbrella_docs": {
+    "live_link": "Docs/live_link.uecpdat"
+  }
+}

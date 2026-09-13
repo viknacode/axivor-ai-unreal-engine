@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "Python",
+  "display_name": "Python Tooling",
+  "description": "UE Python (in-process via the Python Editor Script Plugin) for last-resort scripting when no dedicated tool covers the job. Reserved fallback - if an umbrella exists for the task, use it.",
+  "category": "Engineering",
+  "catalog_blurb": "Last-resort UE Python execution + recipe lookup.",
+  "required_module_name": "UECPPythonExt",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "required_plugins": [],
+  "owned_umbrellas": [
+    "python_tools"
+  ],
+  "owned_tools": [
+    "execute_python",
+    "get_python_recipe"
+  ],
+  "umbrella_docs": {
+    "python_tools": "Docs/python_tools.uecpdat"
+  }
+}
