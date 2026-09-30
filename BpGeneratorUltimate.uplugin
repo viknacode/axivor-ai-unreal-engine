@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 10,
-	"VersionName": "1.6.0",
+	"Version": 11,
+	"VersionName": "1.7.0",
 	"FriendlyName": "Axivor AI",
 	"Description": "Axivor AI - engineering copilot for Unreal Engine 5: Architect chat, Project Scanner, multi-agent Crew, generation tools and an integrated MCP server.",
 	"Category": "Other",

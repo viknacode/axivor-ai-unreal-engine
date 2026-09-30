@@ -52,6 +52,16 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "IPythonScriptPlugin.h"
+#include "Misc/EngineVersion.h"
+#include "Misc/Paths.h"
+#include "ScopedTransaction.h"
+#include "PCGGraph.h"
+#include "PCGNode.h"
+#include "PCGPin.h"
+#include "PCGSettings.h"
+#include "PCGDynamicPins.h"
+#include "PCGSubsystem.h"
+#include "Metadata/PCGDefaultValueInterface.h"
 
 DEFINE_LOG_CATEGORY(LogUECPUE58Ext);
 
@@ -185,15 +195,59 @@ namespace
 	// ═════════════════════════════════════════════════════════════════════════
 	// ue58_feature_status
 	// ═════════════════════════════════════════════════════════════════════════
+
+	// Hotfix fixes that change how Axivor workflows behave. Listed when the running
+	// engine is older than the hotfix, so the AI can explain odd results (or suggest
+	// updating) instead of blaming its own graph/tool calls.
+	struct FHotfixNote { int32 Patch; const TCHAR* Area; const TCHAR* Text; };
+	static const FHotfixNote GHotfixNotes[] = {
+		{ 3, TEXT("pcg"),        TEXT("Integer attributes drift when metadata is interpolated (e.g. Spline Sampler) — round or cast after sampling on older builds.") },
+		{ 3, TEXT("pcg"),        TEXT("Polygon Operation node drops Data-domain attribute values.") },
+		{ 3, TEXT("animation"),  TEXT("Anim runtime state stack reallocates incorrectly with 5+ entries (deep state machine / blend stacks).") },
+		{ 3, TEXT("landscape"),  TEXT("Foliage 'Snap Under Brush Only' regression; crash closing the editor from Landscape paint mode.") },
+		{ 3, TEXT("sequencer"),  TEXT("Crash creating a camera with no level editor viewport open; crash on section easing handles after section removal.") },
+		{ 3, TEXT("metahuman"),  TEXT("ML mask weights act as an on/off switch instead of blending.") },
+		{ 3, TEXT("rendering"),  TEXT("Nanite LOD selection wrongly affected by dynamic resolution / split-screen.") },
+	};
+
+	static TSharedRef<FJsonObject> BuildEngineInfo()
+	{
+		const FEngineVersion& V = FEngineVersion::Current();
+		TSharedRef<FJsonObject> E = MakeShared<FJsonObject>();
+		E->SetStringField(TEXT("version"), FString::Printf(TEXT("%d.%d.%d"), V.GetMajor(), V.GetMinor(), V.GetPatch()));
+		E->SetNumberField(TEXT("changelist"), V.GetChangelist());
+		E->SetStringField(TEXT("branch"), V.GetBranch());
+		TArray<TSharedPtr<FJsonValue>> Missing;
+		if (V.GetMajor() == 5 && V.GetMinor() == 8)
+		{
+			for (const FHotfixNote& N : GHotfixNotes)
+			{
+				if (V.GetPatch() >= N.Patch) continue;
+				TSharedRef<FJsonObject> O = MakeShared<FJsonObject>();
+				O->SetStringField(TEXT("fixed_in"), FString::Printf(TEXT("5.8.%d"), N.Patch));
+				O->SetStringField(TEXT("area"), N.Area);
+				O->SetStringField(TEXT("issue"), N.Text);
+				Missing.Add(MakeShared<FJsonValueObject>(O));
+			}
+		}
+		E->SetArrayField(TEXT("known_issues_fixed_in_later_hotfix"), Missing);
+		E->SetStringField(TEXT("hotfix_status"), Missing.Num() == 0
+			? TEXT("No tracked 5.8 hotfix issues apply to this build.")
+			: TEXT("This build predates fixes listed in known_issues_fixed_in_later_hotfix — suggest updating via the Epic Games Launcher."));
+		return E;
+	}
+
 	static FUECPToolResult HandleFeatureStatus(const TSharedPtr<FJsonObject>&)
 	{
 		TSharedRef<FJsonObject> Out = MakeShared<FJsonObject>();
+		Out->SetObjectField(TEXT("engine"), BuildEngineInfo());
 		TSharedRef<FJsonObject> Plugins = MakeShared<FJsonObject>();
 		static const TCHAR* Names[] = {
 			TEXT("ProceduralVegetationEditor"), TEXT("ControlRigPhysics"), TEXT("ControlRigDynamics"), TEXT("DirectMeshControl"),
 			TEXT("PhysicsControl"), TEXT("MetaHumanCharacter"), TEXT("MetaHumanCrowd"), TEXT("MetaHuman"), TEXT("PoseSearch"), TEXT("Chooser"),
 			TEXT("Mover"), TEXT("MovieSceneAnimMixer"), TEXT("RigMapper"), TEXT("SkeletalMeshModelingTools"),
-			TEXT("ModelContextProtocol"), TEXT("ToolsetRegistry"), TEXT("AllToolsets"), TEXT("FileSandbox"), TEXT("PythonScriptPlugin"), TEXT("PCG") };
+			TEXT("ModelContextProtocol"), TEXT("ToolsetRegistry"), TEXT("AllToolsets"), TEXT("FileSandbox"), TEXT("PythonScriptPlugin"), TEXT("PCG"),
+			TEXT("PCGPythonInterop") };
 		for (const TCHAR* N : Names) Plugins->SetBoolField(N, IsPluginEnabled(N));
 		Out->SetObjectField(TEXT("plugins_enabled"), Plugins);
 
@@ -950,6 +1004,277 @@ namespace
 		Out->SetStringField(TEXT("next"), TEXT("Create/assign the IK Retargeter named like the tag if not done (ik_retarget umbrella), then add a button in the Game Animation Widget to select the character."));
 		return Ok(Out);
 	}
+
+	// ═════════════════════════════════════════════════════════════════════════
+	// pcg_python_processor — PCG Python Data Processor node (PCGPythonInterop, 5.8 beta)
+	// ═════════════════════════════════════════════════════════════════════════
+	static UPCGNode* GetPCGNodeByVirtualIndex(UPCGGraph* Graph, int32 Index)
+	{
+		// Same indexing as the pcg umbrella: 0 = Input, 1 = Output, then Graph->GetNodes().
+		if (Index == 0) return Graph->GetInputNode();
+		if (Index == 1) return Graph->GetOutputNode();
+		const TArray<UPCGNode*>& Mid = Graph->GetNodes();
+		return Mid.IsValidIndex(Index - 2) ? Mid[Index - 2] : nullptr;
+	}
+
+	static bool ReadLabels(const TSharedPtr<FJsonObject>& Args, const TCHAR* Key, TArray<FName>& Out)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+		if (!Args.IsValid() || !Args->TryGetArrayField(Key, Arr) || !Arr) return false;
+		for (const TSharedPtr<FJsonValue>& V : *Arr)
+		{
+			FString S; if (V.IsValid() && V->TryGetString(S) && !S.IsEmpty()) Out.Add(FName(*S));
+		}
+		return Out.Num() > 0;
+	}
+
+	// Make the container hold exactly Labels (rename in place, append, trim the tail).
+	static void SyncDynamicPins(FPCGDynamicPinContainer& C, IPCGDynamicPinsProvider& P, UPCGNode* Node, EPCGPinDirection Dir, const TArray<FName>& Labels)
+	{
+		for (int32 i = C.Num() - 1; i >= Labels.Num(); --i) C.RemovePin(i, Node, Dir);
+		for (int32 i = 0; i < Labels.Num(); ++i)
+		{
+			if (i < C.Num())
+			{
+				if (C.PinProperties[i].Label != Labels[i]) C.RenamePin(i, Labels[i], Node, Dir);
+			}
+			else
+			{
+				FPCGPinProperties Props = P.CreateDefaultDynamicPin(Dir);
+				Props.Label = Labels[i];
+				C.AddPin(MoveTemp(Props));
+			}
+		}
+	}
+
+	static TArray<TSharedPtr<FJsonValue>> PinLabelsJson(const FPCGDynamicPinContainer* C)
+	{
+		TArray<TSharedPtr<FJsonValue>> Arr;
+		if (C) for (const FName& L : C->GetPinLabels()) Arr.Add(MakeShared<FJsonValueString>(L.ToString()));
+		return Arr;
+	}
+
+	static FUECPToolResult HandlePcgPythonProcessor(const TSharedPtr<FJsonObject>& Args)
+	{
+		if (!IsPluginEnabled(TEXT("PCGPythonInterop")))
+			return Fail(TEXT("Plugin 'PCGPythonInterop' is disabled. Call ue58_enable_plugins(plugins=['PCGPythonInterop']) and restart the editor."));
+		UClass* Cls = FindClassByPath(TEXT("/Script/PCGPythonInteropEditor.PCGPythonDataProcessorSettings"));
+		if (!Cls) return Fail(TEXT("UPCGPythonDataProcessorSettings not loaded (PCGPythonInterop enabled but its editor module is missing?)."));
+
+		const FString GraphPath = ArgStr(Args, TEXT("graph_path"));
+		if (GraphPath.IsEmpty()) return Fail(TEXT("graph_path is required."));
+		const FString Script = ArgStr(Args, TEXT("script"));
+		FString ScriptFile = ArgStr(Args, TEXT("script_file"));
+		if (!Script.IsEmpty() && !ScriptFile.IsEmpty()) return Fail(TEXT("Pass either script (inline) or script_file (.py), not both."));
+
+		int32 NodeIndex = (int32)ArgNum(Args, TEXT("node_index"), -1);
+		bool bCreated = false;
+		if (NodeIndex < 0)
+		{
+			TSharedRef<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("graph_path"), GraphPath);
+			A->SetStringField(TEXT("settings_class"), Cls->GetName());
+			A->SetNumberField(TEXT("pos_x"), ArgNum(Args, TEXT("pos_x"), 0));
+			A->SetNumberField(TEXT("pos_y"), ArgNum(Args, TEXT("pos_y"), 0));
+			TSharedPtr<FJsonObject> R; FString Err;
+			if (!CallTool(TEXT("add_pcg_node"), A, R, Err)) return Fail(Err);
+			double Idx = -1; R->TryGetNumberField(TEXT("node_index"), Idx);
+			NodeIndex = (int32)Idx;
+			bCreated = true;
+		}
+
+		UPCGGraph* Graph = Cast<UPCGGraph>(UEditorAssetLibrary::LoadAsset(GraphPath));
+		if (!Graph) return Fail(FString::Printf(TEXT("Could not load PCGGraph at '%s'."), *GraphPath));
+		UPCGNode* Node = GetPCGNodeByVirtualIndex(Graph, NodeIndex);
+		UPCGSettings* Settings = Node ? Node->GetSettings() : nullptr;
+		if (!Settings || !Settings->IsA(Cls))
+			return Fail(FString::Printf(TEXT("Node %d in '%s' is not a PCG Python Data Processor."), NodeIndex, *GraphPath));
+
+		const FScopedTransaction Transaction(NSLOCTEXT("AxivorUE58", "PcgPythonProcessor", "Axivor: Configure PCG Python Data Processor"));
+		Settings->Modify();
+		TArray<FString> Warnings;
+
+		// Script source: inline (Source pin default value) or a .py file.
+		FProperty* MethodProp = Cls->FindPropertyByName(TEXT("ScriptInputMethod"));
+		const auto SetMethod = [&](const TCHAR* Value)
+		{
+			void* Ptr = MethodProp ? MethodProp->ContainerPtrToValuePtr<void>(Settings) : nullptr;
+			if (FEnumProperty* EP = CastField<FEnumProperty>(MethodProp))
+				EP->GetUnderlyingProperty()->SetIntPropertyValue(Ptr, EP->GetEnum()->GetValueByNameString(Value));
+			else if (FByteProperty* BP = CastField<FByteProperty>(MethodProp); BP && BP->Enum)
+				BP->SetPropertyValue(Ptr, (uint8)BP->Enum->GetValueByNameString(Value));
+			else Warnings.Add(TEXT("ScriptInputMethod property not found."));
+		};
+		if (!Script.IsEmpty())
+		{
+			SetMethod(TEXT("Input"));
+			IPCGSettingsDefaultValueProvider* DV = Cast<IPCGSettingsDefaultValueProvider>(Settings);
+			if (!DV) return Fail(TEXT("Processor settings do not expose the default-value interface (engine API changed?)."));
+			DV->SetPinDefaultValueIsActivated(TEXT("Source"), true, /*bDirtySettings=*/false);
+			DV->SetPinDefaultValue(TEXT("Source"), Script);
+		}
+		else if (!ScriptFile.IsEmpty())
+		{
+			if (FPaths::IsRelative(ScriptFile)) ScriptFile = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), ScriptFile);
+			if (!ScriptFile.EndsWith(TEXT(".py"), ESearchCase::IgnoreCase)) return Fail(TEXT("script_file must be a .py file."));
+			if (!FPaths::FileExists(ScriptFile)) Warnings.Add(FString::Printf(TEXT("Script file '%s' does not exist yet."), *ScriptFile));
+			SetMethod(TEXT("File"));
+			FStructProperty* PathProp = CastField<FStructProperty>(Cls->FindPropertyByName(TEXT("ScriptPath")));
+			if (PathProp && PathProp->Struct == TBaseStructure<FFilePath>::Get())
+				PathProp->ContainerPtrToValuePtr<FFilePath>(Settings)->FilePath = ScriptFile;
+			else Warnings.Add(TEXT("ScriptPath property not found."));
+		}
+
+		if (FBoolProperty* Mute = CastField<FBoolProperty>(Cls->FindPropertyByName(TEXT("bMuteEditorToast"))))
+		{
+			if (Args->HasTypedField<EJson::Boolean>(TEXT("mute_toast")))
+				Mute->SetPropertyValue_InContainer(Settings, Args->GetBoolField(TEXT("mute_toast")));
+		}
+
+		// Dynamic pins: inputs[] / outputs[] labels (each accepts any PCG data, multi-connection).
+		IPCGDynamicPinsProvider* Pins = Cast<IPCGDynamicPinsProvider>(Settings);
+		TArray<FName> InLabels, OutLabels;
+		const bool bIn = ReadLabels(Args, TEXT("inputs"), InLabels);
+		const bool bOut = ReadLabels(Args, TEXT("outputs"), OutLabels);
+		if ((bIn || bOut) && !Pins) Warnings.Add(TEXT("Dynamic pin interface unavailable; inputs/outputs ignored."));
+		if (Pins)
+		{
+			if (bIn)  if (FPCGDynamicPinContainer* C = Pins->GetMutableDynamicPinContainer(EPCGPinDirection::Input))  SyncDynamicPins(*C, *Pins, Node, EPCGPinDirection::Input, InLabels);
+			if (bOut) if (FPCGDynamicPinContainer* C = Pins->GetMutableDynamicPinContainer(EPCGPinDirection::Output)) SyncDynamicPins(*C, *Pins, Node, EPCGPinDirection::Output, OutLabels);
+		}
+
+		Settings->PostEditChange();
+		Settings->OnSettingsChangedDelegate.Broadcast(Settings, EPCGChangeType::Node | EPCGChangeType::Edge | EPCGChangeType::Settings);
+		if (UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr)
+		{
+			if (UPCGSubsystem* Sub = World->GetSubsystem<UPCGSubsystem>()) Sub->NotifyGraphChanged(Graph, EPCGChangeType::Structural);
+		}
+		Graph->MarkPackageDirty();
+		UEditorAssetLibrary::SaveAsset(Graph->GetPathName(), false);
+
+		TSharedRef<FJsonObject> Out = MakeShared<FJsonObject>();
+		Out->SetBoolField(TEXT("success"), true);
+		Out->SetBoolField(TEXT("created"), bCreated);
+		Out->SetNumberField(TEXT("node_index"), NodeIndex);
+		Out->SetStringField(TEXT("script_mode"), !ScriptFile.IsEmpty() ? TEXT("file") : (!Script.IsEmpty() ? TEXT("inline") : TEXT("unchanged")));
+		if (!ScriptFile.IsEmpty()) Out->SetStringField(TEXT("script_file"), ScriptFile);
+		if (Pins)
+		{
+			Out->SetArrayField(TEXT("input_pins"), PinLabelsJson(Pins->GetDynamicPinContainer(EPCGPinDirection::Input)));
+			Out->SetArrayField(TEXT("output_pins"), PinLabelsJson(Pins->GetDynamicPinContainer(EPCGPinDirection::Output)));
+		}
+		TArray<TSharedPtr<FJsonValue>> W; for (const FString& S : Warnings) W.Add(MakeShared<FJsonValueString>(S));
+		Out->SetArrayField(TEXT("warnings"), W);
+		Out->SetStringField(TEXT("hint"), TEXT("Wire with connect_pcg_nodes using the pin labels above, then generate_pcg. In the script, read with data_in.get_typed_inputs_by_pin_label('<pin>', unreal.PCGPointData) and emit with data_out.add_to_collection(data, '<pin>', [tags]). Runs on the game thread, uncached."));
+		return Ok(Out);
+	}
+
+	// ═════════════════════════════════════════════════════════════════════════
+	// blueprint_batch_process — UBatchProcessLibrary::RunBatch (5.8 multi-worker batches)
+	// ═════════════════════════════════════════════════════════════════════════
+	static bool CallRunBatch(const FString& JobJson, int32 NumWorkers, FString& OutResult, FString& OutErr)
+	{
+		// UBatchProcessLibrary lives in Kismet's private folder (not exported), so call it
+		// through reflection — exactly how Python's unreal.BatchProcessLibrary.run_batch does.
+		UClass* Lib = FindClassByPath(TEXT("/Script/Kismet.BatchProcessLibrary"));
+		UFunction* Fn = Lib ? Lib->FindFunctionByName(TEXT("RunBatch")) : nullptr;
+		if (!Fn) { OutErr = TEXT("BatchProcessLibrary.RunBatch not found (requires UE 5.8+)."); return false; }
+
+		uint8* Parms = (uint8*)FMemory_Alloca_Aligned(Fn->ParmsSize, Fn->GetMinAlignment());
+		FMemory::Memzero(Parms, Fn->ParmsSize);
+		for (TFieldIterator<FProperty> It(Fn); It && It->HasAnyPropertyFlags(CPF_Parm); ++It) It->InitializeValue_InContainer(Parms);
+
+		bool bBound = true;
+		if (FStrProperty* P = CastField<FStrProperty>(Fn->FindPropertyByName(TEXT("JobJson")))) P->SetPropertyValue_InContainer(Parms, JobJson); else bBound = false;
+		if (FIntProperty* P = CastField<FIntProperty>(Fn->FindPropertyByName(TEXT("NumWorkers")))) P->SetPropertyValue_InContainer(Parms, NumWorkers); else bBound = false;
+		FStrProperty* Ret = CastField<FStrProperty>(Fn->GetReturnProperty());
+		if (bBound && Ret)
+		{
+			Lib->GetDefaultObject()->ProcessEvent(Fn, Parms);
+			OutResult = Ret->GetPropertyValue_InContainer(Parms);
+		}
+		else OutErr = TEXT("RunBatch signature changed (expected JobJson, NumWorkers -> FString).");
+
+		for (TFieldIterator<FProperty> It(Fn); It && It->HasAnyPropertyFlags(CPF_Parm); ++It) It->DestroyValue_InContainer(Parms);
+		return OutErr.IsEmpty();
+	}
+
+	static FUECPToolResult HandleBlueprintBatchProcess(const TSharedPtr<FJsonObject>& Args)
+	{
+		const FString Function = ArgStr(Args, TEXT("function"));
+		if (Function.IsEmpty())
+			return Fail(TEXT("function is required: the UFunction path to run per job, e.g. '/Game/Python/snapshot_assets_PY.SnapshotAsset:snapshot_asset'."));
+
+		TArray<TSharedPtr<FJsonValue>> Arguments;
+		const TArray<TSharedPtr<FJsonValue>>* ArgArr = nullptr;
+		if (Args->TryGetArrayField(TEXT("arguments"), ArgArr) && ArgArr) Arguments = *ArgArr;
+
+		// Discovery mode: one job per asset of asset_class under path.
+		const FString AssetClass = ArgStr(Args, TEXT("asset_class"));
+		if (Arguments.Num() == 0 && !AssetClass.IsEmpty())
+		{
+			const FString ArgName = ArgStr(Args, TEXT("argument_name"), TEXT("asset_path"));
+			IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+			AR.WaitForCompletion();
+			FARFilter Filter;
+			Filter.bRecursivePaths = true;
+			Filter.bRecursiveClasses = true;
+			Filter.PackagePaths.Add(FName(*ArgStr(Args, TEXT("path"), TEXT("/Game"))));
+			UClass* AC = UClass::TryFindTypeSlow<UClass>(AssetClass, EFindFirstObjectOptions::ExactClass);
+			if (!AC) return Fail(FString::Printf(TEXT("asset_class '%s' not found (use the class name, e.g. Blueprint, StaticMesh, Material)."), *AssetClass));
+			Filter.ClassPaths.Add(AC->GetClassPathName());
+			TArray<FAssetData> Assets;
+			AR.GetAssets(Filter, Assets);
+			const int32 Limit = (int32)ArgNum(Args, TEXT("max_jobs"), 0);
+			for (const FAssetData& AD : Assets)
+			{
+				if (Limit > 0 && Arguments.Num() >= Limit) break;
+				TSharedRef<FJsonObject> O = MakeShared<FJsonObject>();
+				O->SetStringField(ArgName, AD.PackageName.ToString());
+				Arguments.Add(MakeShared<FJsonValueObject>(O));
+			}
+		}
+		if (Arguments.Num() == 0)
+			return Fail(TEXT("No jobs: pass arguments[] (one object per job, keys = function parameter names) or asset_class (+ path?) to build one job per asset."));
+
+		TSharedRef<FJsonObject> Job = MakeShared<FJsonObject>();
+		Job->SetStringField(TEXT("Function"), Function);
+		Job->SetArrayField(TEXT("Arguments"), Arguments);
+		const int32 Workers = FMath::Max(0, (int32)ArgNum(Args, TEXT("num_workers"), 0));
+
+		FString ResultJson, Err;
+		if (!CallRunBatch(ToJson(Job), Workers, ResultJson, Err)) return Fail(Err);
+
+		TArray<TSharedPtr<FJsonValue>> Results;
+		const TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(ResultJson);
+		if (!FJsonSerializer::Deserialize(R, Results)) return Fail(FString::Printf(TEXT("RunBatch returned non-JSON output: %s"), *ResultJson.Left(500)));
+
+		int32 Passed = 0;
+		TArray<TSharedPtr<FJsonValue>> Failures;
+		for (const TSharedPtr<FJsonValue>& V : Results)
+		{
+			const TSharedPtr<FJsonObject> O = V.IsValid() ? V->AsObject() : nullptr;
+			if (!O.IsValid()) continue;
+			bool bPassed = false; O->TryGetBoolField(TEXT("Passed"), bPassed);
+			if (bPassed) { ++Passed; continue; }
+			if (Failures.Num() < 25)
+			{
+				TSharedRef<FJsonObject> F = MakeShared<FJsonObject>();
+				F->SetStringField(TEXT("argument"), O->GetStringField(TEXT("ArgumentSummary")));
+				F->SetStringField(TEXT("output"), O->GetStringField(TEXT("Output")).Right(600));
+				Failures.Add(MakeShared<FJsonValueObject>(F));
+			}
+		}
+
+		TSharedRef<FJsonObject> Out = MakeShared<FJsonObject>();
+		Out->SetNumberField(TEXT("jobs"), Results.Num());
+		Out->SetNumberField(TEXT("passed"), Passed);
+		Out->SetNumberField(TEXT("failed"), Results.Num() - Passed);
+		Out->SetNumberField(TEXT("num_workers"), Workers);
+		Out->SetArrayField(TEXT("failures"), Failures);
+		if (Results.Num() - Passed > Failures.Num()) Out->SetBoolField(TEXT("failures_truncated"), true);
+		return Ok(Out);
+	}
 }
 
 void FUECPUE58ExtModule::StartupModule()
@@ -971,12 +1296,16 @@ void FUECPUE58ExtModule::StartupModule()
 	D.RegisterHandler(TEXT("physics_asset_generate"),               HandlePhysicsAssetGenerate);
 	D.RegisterHandler(TEXT("gasp_guide"),                           HandleGaspGuide);
 	D.RegisterHandler(TEXT("gasp_add_character"),                   HandleGaspAddCharacter);
+	D.RegisterHandler(TEXT("pcg_python_processor"),                 HandlePcgPythonProcessor);
+	D.RegisterHandler(TEXT("blueprint_batch_process"),              HandleBlueprintBatchProcess);
 
 	{
 		const FName U(TEXT("ue58"));
 		const auto Meta = [&D, &U](const TCHAR* Action, const TCHAR* Summary, const TCHAR* Params)
 		{ D.RegisterToolMetadata({ FName(Action), U, FString(Summary), FString(Params) }); };
-		Meta(TEXT("ue58_feature_status"), TEXT("Which UE 5.8 feature plugins are enabled (PVE, Control Rig Physics/Dynamics, DMC, MetaHuman, PoseSearch, Chooser, Mover, MCP...) and the current rendering flags (MegaLights, Substrate, Nanite, VSM, Lumen)."), TEXT(""));
+		Meta(TEXT("ue58_feature_status"), TEXT("Engine version/hotfix (with known issues fixed in later 5.8.x hotfixes), which UE 5.8 feature plugins are enabled (PVE, Control Rig Physics/Dynamics, DMC, MetaHuman, PCG Python, PoseSearch, Chooser, Mover, MCP...) and the current rendering flags (MegaLights, Substrate, Nanite, VSM, Lumen)."), TEXT(""));
+		Meta(TEXT("pcg_python_processor"), TEXT("Add or configure a PCG Python Data Processor node (5.8, PCGPythonInterop): Python with direct access to incoming PCG data (data_in / data_out), inline or from a .py file, with named dynamic pins."), TEXT("graph_path, node_index? (omit = create), script? | script_file?, inputs?[] labels, outputs?[] labels, pos_x?, pos_y?, mute_toast?"));
+		Meta(TEXT("blueprint_batch_process"), TEXT("Run a UFunction over many jobs in parallel worker processes (5.8 BatchProcessLibrary.RunBatch) — e.g. audit/fix/snapshot every Blueprint. Blocks until done."), TEXT("function (UFunction path), arguments?[] {param: value} | asset_class + path?=/Game + argument_name?=asset_path + max_jobs?, num_workers?=0 (auto)"));
 		Meta(TEXT("ue58_enable_plugins"), TEXT("Enable/disable engine plugins in the .uproject (restart required)."), TEXT("plugins[], enable?=true"));
 		Meta(TEXT("pve_create_vegetation"), TEXT("Create a Procedural Vegetation asset (5.8 PVE: node-graph trees with Nanite foliage). Returns the inner PCG graph path to author with pcg tools."), TEXT("name, save_path"));
 		Meta(TEXT("pve_list_nodes"), TEXT("List Procedural Vegetation node classes (growers, distributions, meshers, seed, carve, export...) with their editable properties."), TEXT("filter?, include_properties?=true"));
@@ -1002,6 +1331,8 @@ void FUECPUE58ExtModule::StartupModule()
 	RegisterToolSafety(TEXT("render_set_cvars"),    EUECPToolSafety::Write);
 	RegisterToolSafety(TEXT("metahuman_api"),       EUECPToolSafety::Write);
 	RegisterToolSafety(TEXT("physics_asset_generate"), EUECPToolSafety::Write);
+	RegisterToolSafety(TEXT("pcg_python_processor"),   EUECPToolSafety::Write);
+	RegisterToolSafety(TEXT("blueprint_batch_process"), EUECPToolSafety::Write);
 
 	UE_LOG(LogUECPUE58Ext, Log, TEXT("Axivor UE 5.8 feature pack registered (umbrella 'ue58')."));
 }
@@ -1012,7 +1343,8 @@ void FUECPUE58ExtModule::ShutdownModule()
 	IUECPToolDispatcher& D = IUECPCoreModule::Get().GetToolDispatcher();
 	for (const TCHAR* N : { TEXT("ue58_feature_status"), TEXT("ue58_enable_plugins"), TEXT("pve_create_vegetation"), TEXT("pve_list_nodes"), TEXT("pve_open_editor"),
 	                        TEXT("controlrig_physics_from_physics_asset"), TEXT("dmc_add_component"), TEXT("metahuman_api"), TEXT("render_apply_preset"), TEXT("render_set_cvars"),
-	                        TEXT("render_get_state"), TEXT("physics_asset_generate"), TEXT("gasp_guide"), TEXT("gasp_add_character") })
+	                        TEXT("render_get_state"), TEXT("physics_asset_generate"), TEXT("gasp_guide"), TEXT("gasp_add_character"),
+	                        TEXT("pcg_python_processor"), TEXT("blueprint_batch_process") })
 	{
 		D.UnregisterHandler(FName(N));
 	}

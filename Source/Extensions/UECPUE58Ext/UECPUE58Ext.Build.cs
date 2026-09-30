@@ -25,6 +25,9 @@ public class UECPUE58Ext : ModuleRules
 			"PhysicsUtilities", "PhysicsCore",
 			"PythonScriptPlugin",
 			"RenderCore",
+			// PCG Python Data Processor authoring (5.8): graph/node/dynamic-pin API. The
+			// processor class itself (PCGPythonInterop) is resolved by reflection.
+			"PCG",
 		});
 	}
 }

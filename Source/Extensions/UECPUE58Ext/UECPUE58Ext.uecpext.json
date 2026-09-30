@@ -3,9 +3,9 @@
   "api_version": 1,
   "extension_id": "UE58Features",
   "display_name": "Unreal 5.8 Feature Pack",
-  "description": "Tools and guidance for the headline Unreal Engine 5.8 features: Procedural Vegetation Editor (Nanite-foliage trees from a node graph), Control Rig Physics & Dynamics, Direct Mesh Controls, MetaHuman (Mesh to MetaHuman, build, crowds), 5.8 rendering presets (MegaLights production, Lumen Lite, Substrate NPR, Fog Screen Space Scattering, Nanite Foliage), one-call Physics Asset generation for fast iteration, and Game Animation Sample (5.8) integration.",
+  "description": "Tools and guidance for the headline Unreal Engine 5.8 features: Procedural Vegetation Editor (Nanite-foliage trees from a node graph), Control Rig Physics & Dynamics, Direct Mesh Controls, MetaHuman (Mesh to MetaHuman, build, crowds), 5.8 rendering presets (MegaLights production, Lumen Lite, Substrate NPR, Fog Screen Space Scattering, Nanite Foliage), one-call Physics Asset generation for fast iteration, Game Animation Sample (5.8) integration, PCG Python Data Processor nodes, multi-worker Blueprint/asset batch processing (BatchProcessLibrary) and hotfix-aware engine status.",
   "category": "Engine",
-  "catalog_blurb": "PVE, Control Rig Physics, DMC, MetaHuman, 5.8 rendering, Physics Asset, GASP.",
+  "catalog_blurb": "PVE, Control Rig Physics, DMC, MetaHuman, 5.8 rendering, Physics Asset, GASP, PCG Python, batch processing.",
   "required_module_name": "UECPUE58Ext",
   "default_enabled": true,
   "is_third_party": false,
@@ -29,7 +29,9 @@
     "render_get_state",
     "physics_asset_generate",
     "gasp_guide",
-    "gasp_add_character"
+    "gasp_add_character",
+    "pcg_python_processor",
+    "blueprint_batch_process"
   ],
   "umbrella_docs": {
     "ue58": "Docs/ue58.md"
