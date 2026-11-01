@@ -12,6 +12,7 @@
 #include "UECPCoreModule.h"
 #include "Services/IUECPVoiceService.h"
 #include "Services/IUECPACPRegistryService.h"
+#include "Services/ACPTypes.h"
 #include "Services/IUECPAgentRunnerService.h"
 #include "Services/IUECPExtensionService.h"
 #include "Services/IUECPMcpInfoService.h"
@@ -279,7 +280,7 @@ FString UUECPSettingsBridge::LoadAllSettings()
 			ML->SetArrayField(Prov, Arr);
 		}
 		auto AL = MakeShared<FJsonObject>();
-		for (const FString& Ag : {TEXT("claude"), TEXT("codex"), TEXT("copilot"), TEXT("gemini")})
+		for (const FString& Ag : {TEXT("claude"), TEXT("codex"), TEXT("copilot"), TEXT("gemini"), TEXT("antigravity"), TEXT("antigravity-acp")})
 		{
 			TArray<TSharedPtr<FJsonValue>> Arr;
 			for (const FString& M : FProviderConfigManager::Get().GetAgentModels(Ag))
@@ -2304,7 +2305,7 @@ void UUECPSettingsBridge::RequestMcpStatus()
 	const bool    bLan        = Mcp.IsLanAccessEnabled();
 	const FString ProjectName = FApp::GetProjectName();
 
-	const FString HostHint  = bLan ? TEXT("<your-machine-hostname-or-ip>") : TEXT("localhost");
+	const FString HostHint  = TEXT("127.0.0.1");
 	const FString McpUrl    = FString::Printf(TEXT("http://%s:%d/mcp"),        *HostHint, Port);
 	const FString HealthUrl = FString::Printf(TEXT("http://%s:%d/mcp/health"), *HostHint, Port);
 
@@ -2315,6 +2316,65 @@ void UUECPSettingsBridge::RequestMcpStatus()
 		: McpUrl;
 
 	const FString EntryName = FString::Printf(TEXT("uecp-%s"), *ProjectName.ToLower());
+
+	// Auto-sync configuration to Antigravity and Gemini CLI so user doesn't need to do it manually:
+	const FString UserHome = FPlatformProcess::UserHomeDir();
+	if (!UserHome.IsEmpty() && !Token.IsEmpty())
+	{
+		const FString GeminiConfigPath = FPaths::Combine(UserHome, TEXT(".gemini"), TEXT("config"), TEXT("mcp_config.json"));
+		const FString GeminiSettingsPath = FPaths::Combine(UserHome, TEXT(".gemini"), TEXT("settings.json"));
+
+		auto WriteMcpJson = [&](const FString& FilePath)
+		{
+			TSharedPtr<FJsonObject> RootObj;
+			FString ExistingContent;
+			if (FFileHelper::LoadFileToString(ExistingContent, *FilePath))
+			{
+				TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ExistingContent);
+				FJsonSerializer::Deserialize(Reader, RootObj);
+			}
+			if (!RootObj.IsValid())
+			{
+				RootObj = MakeShared<FJsonObject>();
+			}
+
+			const TSharedPtr<FJsonObject>* McpServersPtr = nullptr;
+			TSharedPtr<FJsonObject> McpServers;
+			if (RootObj->TryGetObjectField(TEXT("mcpServers"), McpServersPtr) && McpServersPtr && (*McpServersPtr).IsValid())
+			{
+				McpServers = *McpServersPtr;
+			}
+			else
+			{
+				McpServers = MakeShared<FJsonObject>();
+				RootObj->SetObjectField(TEXT("mcpServers"), McpServers);
+			}
+
+			TSharedRef<FJsonObject> ServerEntry = MakeShared<FJsonObject>();
+			ServerEntry->SetStringField(TEXT("httpUrl"), PreferredUrl);
+			TSharedRef<FJsonObject> HeadersObj = MakeShared<FJsonObject>();
+			HeadersObj->SetStringField(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *Token));
+			ServerEntry->SetObjectField(TEXT("headers"), HeadersObj);
+
+			McpServers->SetObjectField(EntryName, ServerEntry);
+
+			FString OutputJson;
+			TSharedRef<TJsonWriter<>> JsonWriter = TJsonWriterFactory<>::Create(&OutputJson);
+			FJsonSerializer::Serialize(RootObj.ToSharedRef(), JsonWriter);
+
+			IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
+			const FString Dir = FPaths::GetPath(FilePath);
+			if (!PF.DirectoryExists(*Dir))
+			{
+				PF.CreateDirectoryTree(*Dir);
+			}
+			FFileHelper::SaveStringToFile(OutputJson, *FilePath);
+		};
+
+		WriteMcpJson(GeminiConfigPath);
+		WriteMcpJson(GeminiSettingsPath);
+	}
+
 	const FString ConfigSnippet = FString::Printf(
 		TEXT("{\n  \"mcpServers\": {\n    \"%s\": {\n      \"type\": \"http\",\n      \"url\": \"%s\",\n      \"headers\": {\n        \"Authorization\": \"Bearer %s\"\n      }\n    }\n  }\n}"),
 		*EntryName, *PreferredUrl, *Token);
@@ -2757,6 +2817,7 @@ void UUECPSettingsBridge::InstallACPAgent(const FString& AgentId)
 
 void UUECPSettingsBridge::UninstallACPAgent(const FString& AgentId)
 {
+	IUECPCoreModule::Get().GetAgentRunnerService().CancelAgentAuth(AgentId);
 	IUECPCoreModule::Get().GetACPRegistryService().UninstallAgent(AgentId);
 	if (auto W = OwnerWidget.Pin()) W->AgentAuthStates.Remove(AgentId);
 	PushACPCatalog();
@@ -2830,7 +2891,7 @@ void UUECPSettingsBridge::SpawnAuthSubprocess(const FString& AgentId,
 		*AgentId, *Cmd, *ArgsLine);
 
 	FProcHandle Proc = FPlatformProcess::CreateProc(
-		*Cmd, *ArgsLine,  true,  false,  false,
+		*Cmd, *ArgsLine,  false,  false,  false,
 		nullptr, 0, nullptr, nullptr, nullptr);
 
 	if (!Proc.IsValid())
@@ -2865,6 +2926,7 @@ void UUECPSettingsBridge::SpawnAuthSubprocess(const FString& AgentId,
 				}
 				Self->PushACPCatalog();
 				IUECPCoreModule::Get().GetAgentRunnerService().DiscoverAgentConfig(AgentIdCopy);
+				IUECPCoreModule::Get().GetAgentRunnerService().ProbeAgentAuth(AgentIdCopy);
 			}
 		});
 	});
@@ -2946,7 +3008,74 @@ void UUECPSettingsBridge::RecheckACPAgent(const FString& AgentId)
 	}
 	PushACPCatalog();
 	IUECPCoreModule::Get().GetAgentRunnerService().DiscoverAgentConfig(AgentId);
+	IUECPCoreModule::Get().GetAgentRunnerService().ProbeAgentAuth(AgentId);
 	UE_LOG(LogTemp, Log, TEXT("[ACP] Recheck triggered for '%s'"), *AgentId);
+}
+
+void UUECPSettingsBridge::RequestACPAuthStatus(const FString& AgentId)
+{
+	IUECPAgentRunnerService& Runner = IUECPCoreModule::Get().GetAgentRunnerService();
+	const FUECPACPAuthStatus* Status = Runner.GetAgentAuthStatus(AgentId);
+	if (Status && (!Status->BusyOp.IsEmpty() || FPlatformTime::Seconds() - Status->LastProbeAt < 120.0))
+	{
+		PushACPAuthStatus(AgentId);
+		return;
+	}
+	Runner.ProbeAgentAuth(AgentId);
+}
+
+void UUECPSettingsBridge::LoginACPAgent(const FString& AgentId, const FString& MethodId)
+{
+	IUECPCoreModule::Get().GetAgentRunnerService().LoginAgent(AgentId, MethodId);
+}
+
+void UUECPSettingsBridge::LogoutACPAgent(const FString& AgentId)
+{
+	IUECPCoreModule::Get().GetAgentRunnerService().LogoutAgent(AgentId);
+}
+
+void UUECPSettingsBridge::CancelACPAgentAuth(const FString& AgentId)
+{
+	IUECPCoreModule::Get().GetAgentRunnerService().CancelAgentAuth(AgentId);
+}
+
+void UUECPSettingsBridge::PushACPAuthStatus(const FString& AgentId)
+{
+	auto Browser = BrowserRef.Pin();
+	if (!Browser.IsValid()) return;
+	const FUECPACPAuthStatus* Status = IUECPCoreModule::Get().GetAgentRunnerService().GetAgentAuthStatus(AgentId);
+	if (!Status) return;
+
+	const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetStringField(TEXT("state"),
+		Status->State == EUECPACPAuthState::Connected ? TEXT("connected")
+		: Status->State == EUECPACPAuthState::Disconnected ? TEXT("disconnected") : TEXT("unknown"));
+	Root->SetStringField(TEXT("busy"),     Status->BusyOp);
+	Root->SetStringField(TEXT("email"),    Status->Email);
+	Root->SetStringField(TEXT("plan"),     Status->Plan);
+	Root->SetStringField(TEXT("error"),    Status->Error);
+	Root->SetStringField(TEXT("loginUrl"), Status->LoginUrl);
+	Root->SetBoolField  (TEXT("supportsLogout"), Status->bSupportsLogout);
+
+	TArray<TSharedPtr<FJsonValue>> Methods;
+	for (const FUECPACPAuthMethod& M : Status->Methods)
+	{
+		const TSharedRef<FJsonObject> O = MakeShared<FJsonObject>();
+		O->SetStringField(TEXT("id"),          M.Id);
+		O->SetStringField(TEXT("name"),        M.Name);
+		O->SetStringField(TEXT("description"), M.Description);
+		O->SetBoolField  (TEXT("terminal"),    M.bTerminal);
+		Methods.Add(MakeShared<FJsonValueObject>(O));
+	}
+	Root->SetArrayField(TEXT("methods"), Methods);
+
+	FString Body;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
+	FJsonSerializer::Serialize(Root, Writer); Writer->Close();
+
+	Browser->ExecuteJavascript(FString::Printf(
+		TEXT("if(typeof onACPAuthStatus==='function')onACPAuthStatus(\"%s\",%s)"),
+		*ACPEscJs(AgentId), *Body));
 }
 
 void UUECPSettingsBridge::SelectACPAgentForSlot(const FString& AgentId)

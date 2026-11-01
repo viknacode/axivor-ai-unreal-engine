@@ -141,6 +141,11 @@ public:
 	virtual void SendQueryToInstance(FAgentRunnerInstance&, FAgentProviderConfig&, const FString&) override {}
 	virtual void SpawnAgentInstance(const FString&, FAgentProviderConfig&, const FString&, EAgentSourceView) override {}
 	virtual void DiscoverAgentConfig(const FString&) override {}
+	virtual void ProbeAgentAuth(const FString&) override {}
+	virtual void LoginAgent(const FString&, const FString&) override {}
+	virtual void LogoutAgent(const FString&) override {}
+	virtual void CancelAgentAuth(const FString&) override {}
+	virtual const FUECPACPAuthStatus* GetAgentAuthStatus(const FString&) const override { return nullptr; }
 	virtual void NotifyInteractionModeChanged(const FString&) override {}
 };
 

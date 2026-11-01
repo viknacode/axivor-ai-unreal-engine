@@ -564,6 +564,7 @@ bool FUECPACPSession::Tick()
 				Line.TrimEndInline();
 				if (Line.IsEmpty()) continue;
 				UE_LOG(LogUECPACP, Log, TEXT("[%s] stderr: %s"), *Args.LogTag, *Line);
+				if (OnStderrLine.IsBound()) OnStderrLine.Execute(Line);
 			}
 		}
 	}
@@ -615,7 +616,7 @@ void FUECPACPSession::SendInitialize()
 	const int64 Id = Codec.NextRequestId();
 	const FString Frame = FUECPACPJsonRpc::FormatRequest(
 		Id, TEXT("initialize"),
-		UECPACPSchema::BuildInitializeParams(ClientName, ClientTitle, ClientVersion));
+		UECPACPSchema::BuildInitializeParams(ClientName, ClientTitle, ClientVersion, Args.bAuthConnection));
 	Pending.Add(Id, [this](const TSharedPtr<FJsonObject>& Result)
 	{
 		HandleInitializeResult(Result);
@@ -630,11 +631,31 @@ void FUECPACPSession::SendSessionNew()
 	const FString Frame = FUECPACPJsonRpc::FormatRequest(
 		Id, TEXT("session/new"),
 		UECPACPSchema::BuildSessionNewParams(Cwd, Args.McpSpecs));
+	if (Args.bAuthConnection)
+	{
+		PendingErrors.Add(Id, [this](const FString& Message, int32 Code)
+		{
+			if (OnAuthSessionFailed.IsBound()) OnAuthSessionFailed.Execute(Message, Code);
+		});
+	}
 	Pending.Add(Id, [this](const TSharedPtr<FJsonObject>& Result)
 	{
 		HandleSessionNewResult(Result);
+		if (Args.bAuthConnection && OnAuthSessionReady.IsBound())
+		{
+			OnAuthSessionReady.Execute(UECPACPSchema::ReadSessionTierName(Result));
+		}
 	});
 	WriteFrame(Frame);
+}
+
+void FUECPACPSession::SendAuthRequest(const FString& Method, const TSharedRef<FJsonObject>& Params,
+	TFunction<void(const FString&)> Done)
+{
+	const int64 Id = Codec.NextRequestId();
+	Pending.Add(Id, [Done](const TSharedPtr<FJsonObject>& ) { Done(FString()); });
+	PendingErrors.Add(Id, [Done](const FString& Message, int32 ) { Done(Message); });
+	WriteFrame(FUECPACPJsonRpc::FormatRequest(Id, *Method, Params));
 }
 
 void FUECPACPSession::HandleResponseFrame(const TSharedPtr<FJsonObject>& Root)
@@ -645,6 +666,9 @@ void FUECPACPSession::HandleResponseFrame(const TSharedPtr<FJsonObject>& Root)
 
 	TFunction<void(const TSharedPtr<FJsonObject>&)> Cb;
 	Pending.RemoveAndCopyValue(Id, Cb);
+
+	TFunction<void(const FString&, int32)> ErrCb;
+	PendingErrors.RemoveAndCopyValue(Id, ErrCb);
 
 	const bool bWasPref = PendingPrefsIds.Remove(Id) > 0;
 
@@ -668,6 +692,8 @@ void FUECPACPSession::HandleResponseFrame(const TSharedPtr<FJsonObject>& Root)
 
 			UserMessage = FormatJsonRpcErrorForUser(*ErrPtr);
 		}
+
+		if (ErrCb) ErrCb(UserMessage.IsEmpty() ? RawMessage : UserMessage, static_cast<int32>(ErrCode));
 
 		const bool bMethodNotFound = (static_cast<int32>(ErrCode) == -32601);
 
@@ -726,7 +752,10 @@ void FUECPACPSession::HandleResponseFrame(const TSharedPtr<FJsonObject>& Root)
 		return;
 	}
 
-	const TSharedPtr<FJsonObject> Result = Root->GetObjectField(TEXT("result"));
+	// authenticate and logout may answer with a null result.
+	TSharedPtr<FJsonObject> Result;
+	const TSharedPtr<FJsonObject>* ResultPtr = nullptr;
+	if (Root->TryGetObjectField(TEXT("result"), ResultPtr) && ResultPtr) Result = *ResultPtr;
 	if (Cb) Cb(Result);
 	if (bWasPref) MaybeFlushQueuedPrompt();
 }
@@ -753,7 +782,20 @@ void FUECPACPSession::HandleNotificationFrame(const TSharedPtr<FJsonObject>& Roo
 	FString Method;
 	Root->TryGetStringField(TEXT("method"), Method);
 
-	if (Method == TEXT("session/update"))
+	if (Method == TEXT("_auth/status_update"))
+	{
+		if (OnAuthStatusUpdate.IsBound())
+		{
+			const TSharedPtr<FJsonObject>* ParamsPtr = nullptr;
+			FString Kind, Email, Label;
+			if (Root->TryGetObjectField(TEXT("params"), ParamsPtr) && ParamsPtr
+				&& UECPACPSchema::ReadAuthStatusUpdate(*ParamsPtr, Kind, Email, Label))
+			{
+				OnAuthStatusUpdate.Execute(Kind, Email, Label);
+			}
+		}
+	}
+	else if (Method == TEXT("session/update"))
 	{
 		HandleSessionUpdate(Root->GetObjectField(TEXT("params")));
 	}
@@ -780,6 +822,15 @@ void FUECPACPSession::HandleInitializeResult(const TSharedPtr<FJsonObject>& Resu
 		FJsonSerializer::Serialize(Result.ToSharedRef(), W);
 		W->Close();
 		UE_LOG(LogUECPACP, Verbose, TEXT("[%s] initialize result: %s"), *Args.LogTag, *Body.Left(2000));
+	}
+
+	if (Args.bAuthConnection)
+	{
+		TArray<FUECPACPAuthMethod> Methods;
+		bool bLogout = false, bPushesStatus = false;
+		UECPACPSchema::ReadAuthCapabilities(Result, Methods, bLogout, bPushesStatus);
+		if (OnAuthCapabilities.IsBound()) OnAuthCapabilities.Execute(Methods, bLogout, bPushesStatus);
+		return;
 	}
 
 	SendSessionNew();
@@ -984,6 +1035,7 @@ void FUECPACPSession::EnterClosed()
 	if (StderrRead) { FPlatformProcess::ClosePipe(StderrRead, nullptr); StderrRead = nullptr; }
 
 	Pending.Empty();
+	PendingErrors.Empty();
 	PendingPermissionIds.Empty();
 	PendingPrefsIds.Empty();
 	QueuedPromptFrame.Reset();

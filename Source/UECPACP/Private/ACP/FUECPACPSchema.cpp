@@ -5,7 +5,7 @@
 namespace UECPACPSchema
 {
 	TSharedRef<FJsonObject> BuildInitializeParams(const FString& ClientName,
-		const FString& ClientTitle, const FString& ClientVersion)
+		const FString& ClientTitle, const FString& ClientVersion, bool bOfferTerminalAuth)
 	{
 		const TSharedRef<FJsonObject> Caps = MakeShared<FJsonObject>();
 		{
@@ -14,6 +14,17 @@ namespace UECPACPSchema
 			Fs->SetBoolField(TEXT("writeTextFile"), true);
 			Caps->SetObjectField(TEXT("fs"), Fs);
 			Caps->SetBoolField(TEXT("terminal"), false);
+
+			if (bOfferTerminalAuth)
+			{
+				const TSharedRef<FJsonObject> Auth = MakeShared<FJsonObject>();
+				Auth->SetBoolField(TEXT("terminal"), true);
+				Caps->SetObjectField(TEXT("auth"), Auth);
+
+				const TSharedRef<FJsonObject> Meta = MakeShared<FJsonObject>();
+				Meta->SetBoolField(TEXT("terminal-auth"), true);
+				Caps->SetObjectField(TEXT("_meta"), Meta);
+			}
 		}
 
 		const TSharedRef<FJsonObject> Info = MakeShared<FJsonObject>();
@@ -179,6 +190,113 @@ namespace UECPACPSchema
 			Info->TryGetStringField(TEXT("version"), OutAgentVersion);
 		}
 		return true;
+	}
+
+	void ReadAuthCapabilities(const TSharedPtr<FJsonObject>& Result,
+		TArray<FUECPACPAuthMethod>& OutMethods, bool& bOutLogout, bool& bOutPushesStatus)
+	{
+		OutMethods.Reset();
+		bOutLogout = false;
+		bOutPushesStatus = false;
+		if (!Result.IsValid()) return;
+
+		const TSharedPtr<FJsonObject>* CapsPtr = nullptr;
+		if (Result->TryGetObjectField(TEXT("agentCapabilities"), CapsPtr) && CapsPtr)
+		{
+			const TSharedPtr<FJsonObject>* AuthPtr = nullptr;
+			if ((*CapsPtr)->TryGetObjectField(TEXT("auth"), AuthPtr) && AuthPtr)
+			{
+				bOutLogout = (*AuthPtr)->HasField(TEXT("logout"));
+			}
+			const TSharedPtr<FJsonObject>* MetaPtr = nullptr;
+			if ((*CapsPtr)->TryGetObjectField(TEXT("_meta"), MetaPtr) && MetaPtr)
+			{
+				bOutPushesStatus = (*MetaPtr)->HasField(TEXT("authStatus"));
+			}
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* MethodsArr = nullptr;
+		if (!Result->TryGetArrayField(TEXT("authMethods"), MethodsArr) || !MethodsArr) return;
+
+		for (const TSharedPtr<FJsonValue>& V : *MethodsArr)
+		{
+			const TSharedPtr<FJsonObject> Obj = V.IsValid() ? V->AsObject() : nullptr;
+			if (!Obj.IsValid()) continue;
+
+			FUECPACPAuthMethod M;
+			Obj->TryGetStringField(TEXT("id"),          M.Id);
+			Obj->TryGetStringField(TEXT("name"),        M.Name);
+			Obj->TryGetStringField(TEXT("description"), M.Description);
+			if (M.Id.IsEmpty()) continue;
+
+			// Key, gateway and cloud methods need values typed in elsewhere; they are not a login the card can run.
+			const TSharedPtr<FJsonObject>* MetaPtr = nullptr;
+			const bool bHasMeta = Obj->TryGetObjectField(TEXT("_meta"), MetaPtr) && MetaPtr;
+			if ((bHasMeta && ((*MetaPtr)->HasField(TEXT("api-key")) || (*MetaPtr)->HasField(TEXT("gateway"))))
+				|| M.Id.Contains(TEXT("api-key")) || M.Id.Contains(TEXT("gateway"))
+				|| M.Id.Contains(TEXT("vertex")) || M.Id.Contains(TEXT("agent-platform")))
+			{
+				continue;
+			}
+
+			FString Type;
+			Obj->TryGetStringField(TEXT("type"), Type);
+			M.bTerminal = (Type == TEXT("terminal"));
+
+			const TArray<TSharedPtr<FJsonValue>>* ArgsArr = nullptr;
+			if (Obj->TryGetArrayField(TEXT("args"), ArgsArr) && ArgsArr)
+			{
+				for (const TSharedPtr<FJsonValue>& A : *ArgsArr) M.TerminalArgs.Add(A->AsString());
+			}
+
+			const TSharedPtr<FJsonObject>* TermPtr = nullptr;
+			if (bHasMeta && (*MetaPtr)->TryGetObjectField(TEXT("terminal-auth"), TermPtr) && TermPtr)
+			{
+				M.bTerminal = true;
+				(*TermPtr)->TryGetStringField(TEXT("command"), M.TerminalCommand);
+				if ((*TermPtr)->TryGetArrayField(TEXT("args"), ArgsArr) && ArgsArr)
+				{
+					M.TerminalArgs.Reset();
+					for (const TSharedPtr<FJsonValue>& A : *ArgsArr) M.TerminalArgs.Add(A->AsString());
+				}
+			}
+			OutMethods.Add(MoveTemp(M));
+		}
+	}
+
+	bool ReadAuthStatusUpdate(const TSharedPtr<FJsonObject>& Params,
+		FString& OutKind, FString& OutEmail, FString& OutLabel)
+	{
+		if (!Params.IsValid()) return false;
+		const TSharedPtr<FJsonObject>* StatusPtr = nullptr;
+		if (!Params->TryGetObjectField(TEXT("authStatus"), StatusPtr) || !StatusPtr) return false;
+
+		(*StatusPtr)->TryGetStringField(TEXT("kind"),  OutKind);
+		(*StatusPtr)->TryGetStringField(TEXT("label"), OutLabel);
+		const TSharedPtr<FJsonObject>* AccountPtr = nullptr;
+		if ((*StatusPtr)->TryGetObjectField(TEXT("account"), AccountPtr) && AccountPtr)
+		{
+			(*AccountPtr)->TryGetStringField(TEXT("email"), OutEmail);
+		}
+		return !OutKind.IsEmpty();
+	}
+
+	FString ReadSessionTierName(const TSharedPtr<FJsonObject>& Result)
+	{
+		if (!Result.IsValid()) return FString();
+		const TSharedPtr<FJsonObject>* MetaPtr = nullptr;
+		if (!Result->TryGetObjectField(TEXT("_meta"), MetaPtr) || !MetaPtr) return FString();
+
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Vendor : (*MetaPtr)->Values)
+		{
+			const TSharedPtr<FJsonObject>* VendorObj = nullptr;
+			if (!Vendor.Value.IsValid() || !Vendor.Value->TryGetObject(VendorObj) || !VendorObj) continue;
+			const TSharedPtr<FJsonObject>* TierPtr = nullptr;
+			if (!(*VendorObj)->TryGetObjectField(TEXT("tier"), TierPtr) || !TierPtr) continue;
+			FString Name;
+			if ((*TierPtr)->TryGetStringField(TEXT("name"), Name) && !Name.IsEmpty()) return Name;
+		}
+		return FString();
 	}
 
 	bool ReadSessionNewResult(const TSharedPtr<FJsonObject>& Result, FString& OutSessionId)

@@ -136,6 +136,16 @@ public:
 
 	UFUNCTION() void RecheckACPAgent(const FString& AgentId);
 
+	UFUNCTION() void RequestACPAuthStatus(const FString& AgentId);
+
+	UFUNCTION() void LoginACPAgent(const FString& AgentId, const FString& MethodId);
+
+	UFUNCTION() void LogoutACPAgent(const FString& AgentId);
+
+	UFUNCTION() void CancelACPAgentAuth(const FString& AgentId);
+
+	void PushACPAuthStatus(const FString& AgentId);
+
 	UFUNCTION() void SetACPAgentConfig(const FString& AgentId, const FString& Key, const FString& Value);
 
 	void PushACPCatalog();

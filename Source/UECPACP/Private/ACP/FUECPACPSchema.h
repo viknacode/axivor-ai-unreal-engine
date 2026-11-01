@@ -4,12 +4,21 @@
 
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
+#include "Services/ACPTypes.h"
 
 namespace UECPACPSchema
 {
 
 	TSharedRef<FJsonObject> BuildInitializeParams(const FString& ClientName,
-		const FString& ClientTitle, const FString& ClientVersion);
+		const FString& ClientTitle, const FString& ClientVersion, bool bOfferTerminalAuth = false);
+
+	void ReadAuthCapabilities(const TSharedPtr<FJsonObject>& Result,
+		TArray<FUECPACPAuthMethod>& OutMethods, bool& bOutLogout, bool& bOutPushesStatus);
+
+	bool ReadAuthStatusUpdate(const TSharedPtr<FJsonObject>& Params,
+		FString& OutKind, FString& OutEmail, FString& OutLabel);
+
+	FString ReadSessionTierName(const TSharedPtr<FJsonObject>& Result);
 
 	struct FMcpServerSpec
 	{

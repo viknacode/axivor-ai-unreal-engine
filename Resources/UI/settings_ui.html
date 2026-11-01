@@ -203,6 +203,21 @@ select option{background:#151a25}
 .acp-state.err .acp-state-title{color:var(--err)}
 
 /* Sign-in / auth-required block (behaviour unchanged) */
+.acp-conn{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 11px;margin:10px 0;
+  background:var(--bg-input);border:1px solid var(--bg-border);border-radius:8px}
+.acp-conn-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--text-3)}
+.acp-conn.ok .acp-conn-dot{background:var(--ok)}
+.acp-conn.off .acp-conn-dot{background:var(--warn)}
+.acp-conn.err .acp-conn-dot{background:var(--err)}
+.acp-conn.busy .acp-conn-dot{background:var(--accent);animation:acp-conn-pulse 1.2s ease-in-out infinite}
+@keyframes acp-conn-pulse{50%{opacity:.35}}
+.acp-conn-text{flex:1;min-width:160px}
+.acp-conn-title{font-size:12px;font-weight:600;color:var(--text);overflow-wrap:anywhere}
+.acp-conn-sub{font-size:11px;color:var(--text-3);line-height:1.45;margin-top:1px}
+.acp-conn-sub a{color:var(--accent);cursor:pointer;text-decoration:underline}
+.acp-conn-error{font-size:11px;color:var(--err);line-height:1.45;margin-top:3px;overflow-wrap:anywhere}
+.acp-conn-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.acp-conn-method{max-width:190px;background:var(--bg-card);color:var(--text);border:1px solid var(--bg-border);border-radius:6px;padding:4px 6px;font-size:11px}
 .acp-auth-required{display:flex;flex-direction:column;gap:9px;padding:12px 13px;margin-bottom:2px;
   background:rgba(229,157,40,.08);border:1px solid rgba(229,157,40,.35);border-radius:8px}
 .acp-auth-required .acp-auth-msg{font-size:11.5px;color:var(--text-2);line-height:1.5}
@@ -929,6 +944,16 @@ function _icon(id, size) {
           <div class="prov-panel active" id="pp-Gemini">
             <label class="field-label">Model</label>
             <select id="gemini-model" onchange="onProvModelChange('gemini-model')">
+              <option value="gemini-3.8-flash">gemini-3.8-flash</option>
+              <option value="gemini-3.7-flash">gemini-3.7-flash</option>
+              <option value="gemini-3.6-flash">gemini-3.6-flash</option>
+              <option value="gemini-3.1-pro">gemini-3.1-pro</option>
+              <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+              <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+              <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+              <option value="gemini-1.5-flash">gemini-1.5-flash</option>
               <option value="__custom__">Custom</option>
             </select>
             <input id="gemini-model-custom" class="agent-custom-model" type="text" placeholder="Enter model ID..." style="display:none" oninput="slotDirty()">
@@ -936,6 +961,26 @@ function _icon(id, size) {
           <div class="prov-panel" id="pp-OpenAI">
             <label class="field-label">Model</label>
             <select id="openai-model" onchange="onProvModelChange('openai-model')">
+              <option value="gpt-5.5">gpt-5.5</option>
+              <option value="gpt-5.5-pro">gpt-5.5-pro</option>
+              <option value="gpt-6-astra">gpt-6-astra</option>
+              <option value="gpt-6-sol">gpt-6-sol</option>
+              <option value="gpt-6-luna">gpt-6-luna</option>
+              <option value="gpt-6">gpt-6</option>
+              <option value="gpt-5.4">gpt-5.4</option>
+              <option value="gpt-5.4-mini">gpt-5.4-mini</option>
+              <option value="gpt-5.4-nano">gpt-5.4-nano</option>
+              <option value="gpt-5.2">gpt-5.2</option>
+              <option value="gpt-4.1">gpt-4.1</option>
+              <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+              <option value="o3">o3</option>
+              <option value="o3-pro">o3-pro</option>
+              <option value="o3-mini">o3-mini</option>
+              <option value="o4-mini">o4-mini</option>
+              <option value="o1">o1</option>
+              <option value="o1-mini">o1-mini</option>
+              <option value="gpt-4o">gpt-4o</option>
+              <option value="gpt-4o-mini">gpt-4o-mini</option>
               <option value="__custom__">Custom</option>
             </select>
             <input id="openai-model-custom" class="agent-custom-model" type="text" placeholder="Enter model ID..." style="display:none" oninput="slotDirty()">
@@ -968,7 +1013,7 @@ function _icon(id, size) {
           </div>
 
           <label class="field-label" data-i18n="s_custom_params">Custom Request Params (JSON)</label>
-          <textarea id="custom-params" placeholder='{"temperature":0.7,"max_tokens":16384}' oninput="slotDirty()"></textarea>
+          <textarea id="custom-params" placeholder='{"temperature":0.7,"max_completion_tokens":16384}' oninput="slotDirty()"></textarea>
         </div>
       </div>
 
@@ -2863,9 +2908,29 @@ function initSettings(data){
 }
 
 function populateModelDropdowns(lists){
-  // Provider dropdowns
+  // Provider dropdowns with modern fallback guarantees
+  var fallbackModels = {
+    'openai': ['gpt-5.5', 'gpt-5.5-pro', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.2', 'gpt-4.1', 'gpt-4.1-mini', 'o3', 'o3-pro', 'o3-mini', 'o4-mini', 'o1', 'o1-mini', 'gpt-4o', 'gpt-4o-mini'],
+    'gemini': ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.1-pro', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
+  };
   var map={'gemini':'gemini-model','openai':'openai-model','claude':'claude-model','deepseek':'deepseek-model'};
-  for(var prov in map) _fillSelect(map[prov], lists[prov]||[]);
+  for(var prov in map) {
+    var arr = lists[prov] || [];
+    var fb = fallbackModels[prov] || [];
+    var merged = [];
+    var seen = {};
+    for (var k=0; k<fb.length; k++) {
+      merged.push(fb[k]);
+      seen[fb[k].toLowerCase()] = true;
+    }
+    for (var k=0; k<arr.length; k++) {
+      if (!seen[arr[k].toLowerCase()]) {
+        merged.push(arr[k]);
+        seen[arr[k].toLowerCase()] = true;
+      }
+    }
+    _fillSelect(map[prov], merged.length > 0 ? merged : arr);
+  }
   // Agent dropdowns
   var agents=lists.agents||{};
   var amap={'claude':'ag-claude-model','codex':'ag-codex-model','copilot':'ag-copilot-model','gemini':'ag-gemini-model'};
@@ -4166,6 +4231,95 @@ function _acpVerHtml(a, cls){
   return '<span class="'+cls+'">v'+escACP(a.version)+'</span>';
 }
 
+// ── Per-agent connection row. Only reports what the agent itself says about who is signed in. ──
+var _acpAuth={};            // id → status pushed by C++
+var _acpAuthRequested={};   // id → already asked this page load
+var _acpLoginMethod={};     // id → method picked in the dropdown
+function _acpAuthHtml(a){
+  if(!a.installed) return '';
+  var s=_acpAuth[a.id], idEsc=escACP(a.id);
+  var methods=(s&&s.methods)||[];
+  var cls='', title='', sub='', btns='';
+  var refreshBtn='<button type="button" class="btn btn-ghost btn-sm" title="Verificar a conexão de novo" onclick="acpAuthRefresh(\''+idEsc+'\')">Atualizar</button>';
+  if(!s||s.busy==='probe'){
+    cls='busy'; title='Verificando conexão…';
+  } else if(s.busy==='login'){
+    cls='busy'; title='Aguardando login…';
+    sub='Conclua no navegador ou na janela que abriu.'
+       +(s.loginUrl?' <a onclick="acpAuthOpenUrl(\''+idEsc+'\')">Abrir página de login</a>':'');
+    btns='<button type="button" class="btn btn-ghost btn-sm" onclick="acpAuthCancel(\''+idEsc+'\')">Cancelar</button>';
+  } else if(s.busy==='logout'){
+    cls='busy'; title='Deslogando…';
+  } else if(s.state==='connected'){
+    cls='ok';
+    title=s.email?('Conectado como '+escACP(s.email)):'Conectado';
+    sub=escACP(s.plan||'')+(s.email?'':((s.plan?' · ':'')+'conta não informada pelo agente'));
+    if(!s.supportsLogout){
+      sub+=(sub?' · ':'')+(a.id==='gemini'?'para sair, abra o Gemini CLI e use /auth signout':'este agente não oferece logout por aqui');
+    }
+    btns=(s.supportsLogout?'<button type="button" class="btn btn-ghost btn-sm" onclick="acpAuthLogout(\''+idEsc+'\')">Deslogar</button>':'')+refreshBtn;
+  } else if(s.state==='disconnected'){
+    cls='off'; title='Desconectado';
+    var picked=_acpLoginMethod[a.id]||(methods[0]&&methods[0].id)||'';
+    if(methods.length>1){
+      btns='<select class="acp-conn-method" onchange="acpAuthPickMethod(\''+idEsc+'\',this.value)">'
+          +methods.map(function(m){
+             return '<option value="'+escACP(m.id)+'"'+(m.id===picked?' selected':'')+' title="'+escACP(m.description||'')+'">'+escACP(m.name||m.id)+'</option>';
+           }).join('')+'</select>';
+    }
+    btns+=(methods.length
+           ?'<button type="button" class="btn btn-primary btn-sm" onclick="acpAuthLogin(\''+idEsc+'\')">Logar</button>'
+           :'<button type="button" class="btn btn-primary btn-sm" onclick="acpSignIn(\''+idEsc+'\')">Logar</button>')
+        +refreshBtn;
+  } else {
+    cls='err'; title='Não foi possível verificar a conexão';
+    btns=refreshBtn;
+  }
+  return '<div class="acp-conn '+cls+'"><span class="acp-conn-dot"></span>'
+       +   '<div class="acp-conn-text"><div class="acp-conn-title">'+title+'</div>'
+       +     (sub?'<div class="acp-conn-sub">'+sub+'</div>':'')
+       +     (s&&s.error?'<div class="acp-conn-error">'+escACP(s.error)+'</div>':'')
+       +   '</div>'
+       +   (btns?'<div class="acp-conn-actions">'+btns+'</div>':'')
+       +'</div>';
+}
+function _acpAuthEnsure(){
+  if(!(window.ue&&window.ue.bridge&&window.ue.bridge.requestacpauthstatus)) return;
+  _acpCatalog.forEach(function(a){
+    if(a.installed&&!_acpAuthRequested[a.id]){ _acpAuthRequested[a.id]=true; window.ue.bridge.requestacpauthstatus(a.id); }
+  });
+}
+function onACPAuthStatus(id,status){
+  if(typeof status==='string'){ try{ status=JSON.parse(status); }catch(e){ return; } }
+  if(!status||typeof status!=='object') return;
+  _acpAuth[id]=status;
+  renderACPCatalog();
+}
+function acpAuthRefresh(id){ if(window.ue&&window.ue.bridge) window.ue.bridge.recheckacpagent(id); }
+function acpAuthPickMethod(id,methodId){ _acpLoginMethod[id]=methodId; }
+function acpAuthLogin(id){
+  var methods=(_acpAuth[id]&&_acpAuth[id].methods)||[];
+  var methodId=_acpLoginMethod[id]||(methods[0]&&methods[0].id)||'';
+  if(window.ue&&window.ue.bridge) window.ue.bridge.loginacpagent(id,methodId);
+}
+function acpAuthCancel(id){ if(window.ue&&window.ue.bridge) window.ue.bridge.cancelacpagentauth(id); }
+function acpAuthOpenUrl(id){
+  var s=_acpAuth[id];
+  if(s&&s.loginUrl&&window.ue&&window.ue.bridge) window.ue.bridge.openexternalurl(s.loginUrl);
+}
+function acpAuthLogout(id){
+  var s=_acpAuth[id]||{}, agent=null;
+  for(var i=0;i<_acpCatalog.length;i++){ if(_acpCatalog[i].id===id){ agent=_acpCatalog[i]; break; } }
+  showSettingsDialog({
+    title:        'Deslogar de '+((agent&&agent.name)||id)+'?',
+    message:      (s.email?('A conta '+s.email+' será desconectada deste agente. '):'A sessão deste agente será encerrada. ')
+                 +'Os chats abertos com ele são interrompidos, e o login é removido deste computador, inclusive para outros programas que usam o mesmo agente, como o CLI dele.',
+    confirmLabel: 'Deslogar',
+    danger:       true,
+    onConfirm:    function(){ if(window.ue&&window.ue.bridge) window.ue.bridge.logoutacpagent(id); }
+  });
+}
+
 function buildACPActiveHtml(a){
   var cfg=(_acpConfig&&_acpConfig[a.id])||null;
   var prog=_acpProgress[a.id]||null;
@@ -4192,7 +4346,9 @@ function buildACPActiveHtml(a){
   }
 
   var authHtml='', dials='';
-  if(a.authRequired){
+  var authInfo=_acpAuth[a.id];
+  var hasLoginMethods=!!(authInfo&&authInfo.methods&&authInfo.methods.length);
+  if(a.authRequired&&authInfo&&!hasLoginMethods){
     // Discovery flagged the agent as needing OAuth — surface a Sign-in CTA.
     var idEsc = escACP(a.id);
     var entry = a.entrypointCommand || '';
@@ -4236,7 +4392,7 @@ function buildACPActiveHtml(a){
             }).join('')
           +'</select></div>';
   } else {
-    dials+='<div class="acp-config-block"><span class="acp-config-hint">Detecting models…</span></div>';
+    dials+='<div class="acp-config-block"><span class="acp-config-hint">'+(a.authRequired?'Faça login para carregar os modelos.':'Detecting models…')+'</span></div>';
   }
   // Agent-extension dials (Codex reasoning_effort, etc.) — secondary to Model.
   if(cfg&&cfg.sections&&cfg.sections.length){
@@ -4263,6 +4419,7 @@ function buildACPActiveHtml(a){
        +     '</div></div>'
        +   '</div>'
        +   '<div class="acp-active-desc">'+escACP(a.description)+'</div>'
+       +   _acpAuthHtml(a)
        +   authHtml
        +   (dials ? '<div class="acp-config-group">'+dials+'</div>' : '')
        +   '<div class="acp-active-actions">'+updBtn
@@ -4298,6 +4455,7 @@ function buildACPCardHtml(a){
        +       '<div class="acp-card-desc">'+escACP(a.description||'')+'</div>'
        +     '</div>'
        +   '</div>'
+       +   _acpAuthHtml(a)
        +   '<div class="acp-card-actions">'+actions+'</div>'
        +   progHtml
        +'</div>';
@@ -4390,6 +4548,7 @@ var _acpCatalogFailed=false;
 function onACPCatalog(arr){
   _acpCatalog=arr||[];
   if(_acpCatalog.length) _acpCatalogFailed=false;
+  _acpAuthEnsure();
   renderACPCatalog();
   // Registry fetch is async; if the first push arrived before the CDN
   // response landed, keep polling briefly until the catalog populates. If it
@@ -4415,7 +4574,7 @@ function onACPInstallProgress(id,stage,frac,done,ok){
   renderACPCatalog();
 }
 function acpInstall(id){ if(window.ue&&window.ue.bridge) window.ue.bridge.installacpagent(id); }
-function acpUninstall(id){ if(window.ue&&window.ue.bridge) window.ue.bridge.uninstallacpagent(id); }
+function acpUninstall(id){ delete _acpAuth[id]; delete _acpAuthRequested[id]; if(window.ue&&window.ue.bridge) window.ue.bridge.uninstallacpagent(id); }
 function acpUpdate(id){ acpInstall(id); } // reinstall pulls the latest pinned version + rewrites the install marker
 function acpRefresh(){
   if(!(window.ue&&window.ue.bridge)) return;

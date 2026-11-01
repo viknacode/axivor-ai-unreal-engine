@@ -73,6 +73,46 @@ struct FUECPACPInstallMarker
 	FString InstalledAtUtc;
 };
 
+struct FUECPACPAuthMethod
+{
+	FString Id;
+	FString Name;
+	FString Description;
+
+	bool bTerminal = false;
+
+	FString TerminalCommand;
+
+	TArray<FString> TerminalArgs;
+};
+
+enum class EUECPACPAuthState : uint8
+{
+	Unknown,
+	Connected,
+	Disconnected
+};
+
+// Never holds a credential: only what the agent reports about who is signed in.
+struct FUECPACPAuthStatus
+{
+	EUECPACPAuthState State = EUECPACPAuthState::Unknown;
+
+	// "probe", "login", "logout", or empty when idle.
+	FString BusyOp;
+
+	FString Email;
+	FString Plan;
+
+	bool bSupportsLogout = false;
+	TArray<FUECPACPAuthMethod> Methods;
+
+	FString LoginUrl;
+	FString Error;
+
+	double LastProbeAt = 0.0;
+};
+
 struct FUECPACPConfigOption
 {
 	FString Id;

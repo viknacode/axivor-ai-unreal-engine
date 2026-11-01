@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Services/ACPTypes.h"
 #include "Services/IUECPAgentRunnerService.h"
 
 class UUECPAppBridge;
@@ -12,6 +13,7 @@ class UECPACP_API FUECPAgentRunnerCoordinator final : public IUECPAgentRunnerSer
 {
 public:
 	FUECPAgentRunnerCoordinator() = default;
+	virtual ~FUECPAgentRunnerCoordinator() override;
 
 	virtual void InitializeShellRefs(TWeakPtr<SUECPMainWidget> InShell,
 		TWeakObjectPtr<UUECPAppBridge> InBridge) override;
@@ -39,7 +41,28 @@ private:
 		const FString& Prompt, EAgentSourceView SourceView);
 	bool OnACPInstanceTick(TSharedPtr<FAgentRunnerInstance> Inst);
 
+	struct FAgentAuthOp;
+	TMap<FString, TSharedPtr<FAgentAuthOp>> AuthOps;
+	TMap<FString, FUECPACPAuthStatus>       AuthStatuses;
+
+	void StartAuthOp(const FString& AgentId, const FString& Kind, const FString& MethodId,
+		const FString& AfterOp = FString(), const FString& CarriedError = FString());
+	void StartTerminalLogin(const FString& AgentId, const FUECPACPAuthMethod& Method);
+	void AddAuthOpTicker(const TSharedPtr<FAgentAuthOp>& Op);
+	bool TickAuthOp(const TSharedPtr<FAgentAuthOp>& Op);
+	void FinishAuthOp(const TSharedPtr<FAgentAuthOp>& Op);
+	void AbortAuthOp(const FString& AgentId);
+	bool StopIdleChatsForAgent(const FString& AgentId);
+	void FailAuthRequest(const FString& AgentId, const FString& Message);
+	void PushAgentAuthStatus(const FString& AgentId);
+
 public:
 
 	void DiscoverAgentConfig(const FString& AgentId);
+
+	virtual void ProbeAgentAuth(const FString& AgentId) override;
+	virtual void LoginAgent(const FString& AgentId, const FString& MethodId) override;
+	virtual void LogoutAgent(const FString& AgentId) override;
+	virtual void CancelAgentAuth(const FString& AgentId) override;
+	virtual const FUECPACPAuthStatus* GetAgentAuthStatus(const FString& AgentId) const override;
 };

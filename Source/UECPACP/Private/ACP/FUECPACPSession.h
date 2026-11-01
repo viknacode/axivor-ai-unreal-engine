@@ -39,6 +39,10 @@ public:
 		TArray<UECPACPSchema::FMcpServerSpec> McpSpecs;
 
 		FString LogTag;
+
+		// Short-lived auth connection: offers terminal login and waits after `initialize`
+		// instead of opening a session, so the caller picks authenticate, logout or session/new.
+		bool bAuthConnection = false;
 	};
 
 	bool Start(const FSpawnArgs& InArgs);
@@ -58,6 +62,12 @@ public:
 
 	void RespondToPermission(const FString& ToolCallId, const FString& OptionId);
 
+	void RequestSessionNew() { SendSessionNew(); }
+
+	// Done receives an empty string on success, or the agent's error message.
+	void SendAuthRequest(const FString& Method, const TSharedRef<FJsonObject>& Params,
+		TFunction<void(const FString&)> Done);
+
 	EState GetState() const { return State; }
 	bool   IsRunning() const { return State != EState::Uninit && State != EState::Closed; }
 	const FString& GetSessionId() const { return SessionId; }
@@ -72,6 +82,21 @@ public:
 
 	DECLARE_DELEGATE_OneParam(FOnAuthRequired, const FString& );
 	FOnAuthRequired OnAuthRequired;
+
+	DECLARE_DELEGATE_ThreeParams(FOnAuthCapabilities, const TArray<FUECPACPAuthMethod>& , bool , bool );
+	FOnAuthCapabilities OnAuthCapabilities;
+
+	DECLARE_DELEGATE_ThreeParams(FOnAuthStatusUpdate, const FString& , const FString& , const FString& );
+	FOnAuthStatusUpdate OnAuthStatusUpdate;
+
+	DECLARE_DELEGATE_OneParam(FOnAuthSessionReady, const FString& );
+	FOnAuthSessionReady OnAuthSessionReady;
+
+	DECLARE_DELEGATE_TwoParams(FOnAuthSessionFailed, const FString& , int32 );
+	FOnAuthSessionFailed OnAuthSessionFailed;
+
+	DECLARE_DELEGATE_OneParam(FOnStderrLine, const FString& );
+	FOnStderrLine OnStderrLine;
 
 	using FPermissionOptionList = TArray<TPair<FString, FString>>;
 	DECLARE_DELEGATE_FourParams(FOnPermissionRequest,
@@ -135,6 +160,8 @@ private:
 	bool   bSilenceWarned = false;
 
 	TMap<int64, TFunction<void(const TSharedPtr<FJsonObject>&)>> Pending;
+
+	TMap<int64, TFunction<void(const FString&, int32)>> PendingErrors;
 
 	int64 CurrentPromptId = -1;
 

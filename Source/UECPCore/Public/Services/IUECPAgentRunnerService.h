@@ -9,6 +9,7 @@ class SUECPMainWidget;
 class UUECPAppBridge;
 struct FAgentRunnerInstance;
 struct FAgentProviderConfig;
+struct FUECPACPAuthStatus;
 enum class EAgentSourceView : uint8;
 
 class UECPCORE_API IUECPAgentRunnerService
@@ -36,6 +37,12 @@ public:
 	virtual void SpawnAgentInstance(const FString& ChatID, FAgentProviderConfig& Config, const FString& Prompt, EAgentSourceView SourceView) = 0;
 
 	virtual void DiscoverAgentConfig(const FString& AgentId) = 0;
+
+	virtual void ProbeAgentAuth(const FString& AgentId) = 0;
+	virtual void LoginAgent(const FString& AgentId, const FString& MethodId) = 0;
+	virtual void LogoutAgent(const FString& AgentId) = 0;
+	virtual void CancelAgentAuth(const FString& AgentId) = 0;
+	virtual const FUECPACPAuthStatus* GetAgentAuthStatus(const FString& AgentId) const = 0;
 
 	virtual void NotifyInteractionModeChanged(const FString& ChatID) = 0;
 };

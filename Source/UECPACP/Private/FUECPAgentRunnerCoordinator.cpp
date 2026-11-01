@@ -10,6 +10,8 @@
 #include "Managers/PlanManager.h"
 #include "Managers/SettingsManager.h"
 #include "Managers/UpdateManager.h"
+#include "Managers/ProviderConfigManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Utils/EditorRuntime.h"
 #include "UECPCoreModule.h"
 #include "Services/IUECPAiMemoryService.h"
@@ -55,6 +57,93 @@
 
 namespace
 {
+	void EnsureAntigravityConfigured(const FString& AgentId)
+	{
+		if (!AgentId.Contains(TEXT("antigravity"), ESearchCase::IgnoreCase))
+		{
+			return;
+		}
+
+		FString GeminiKey = FPlatformMisc::GetEnvironmentVariable(TEXT("GEMINI_API_KEY"));
+		if (GeminiKey.IsEmpty())
+		{
+			// Check active slot first
+			const FApiKeySlot ActiveSlot = FApiKeyManager::Get().GetActiveSlot();
+			if ((ActiveSlot.Provider.Contains(TEXT("gemini"), ESearchCase::IgnoreCase) ||
+				 ActiveSlot.Provider.Contains(TEXT("antigravity"), ESearchCase::IgnoreCase) ||
+				 ActiveSlot.Provider.Contains(TEXT("google"), ESearchCase::IgnoreCase)) &&
+				!ActiveSlot.ApiKey.IsEmpty())
+			{
+				GeminiKey = ActiveSlot.ApiKey;
+			}
+
+			// If not found in active slot, scan all slots
+			if (GeminiKey.IsEmpty())
+			{
+				for (const FApiKeySlot& Slot : FApiKeyManager::Get().GetAllSlots())
+				{
+					if ((Slot.Provider.Contains(TEXT("gemini"), ESearchCase::IgnoreCase) ||
+						 Slot.Provider.Contains(TEXT("antigravity"), ESearchCase::IgnoreCase) ||
+						 Slot.Provider.Contains(TEXT("google"), ESearchCase::IgnoreCase)) &&
+						!Slot.ApiKey.IsEmpty())
+					{
+						GeminiKey = Slot.ApiKey;
+						break;
+					}
+				}
+			}
+		}
+
+		if (!GeminiKey.IsEmpty())
+		{
+			FPlatformMisc::SetEnvironmentVar(TEXT("GEMINI_API_KEY"), *GeminiKey);
+		}
+
+		FString UserProfile = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
+		if (UserProfile.IsEmpty())
+		{
+			UserProfile = FPlatformProcess::UserHomeDir();
+		}
+		if (!UserProfile.IsEmpty())
+		{
+			const FString SettingsDir = FPaths::Combine(UserProfile, TEXT(".gemini"), TEXT("antigravity-acp"));
+			const FString SettingsFile = FPaths::Combine(SettingsDir, TEXT("settings.json"));
+
+			IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+			if (!PlatformFile.DirectoryExists(*SettingsDir))
+			{
+				PlatformFile.CreateDirectoryTree(*SettingsDir);
+			}
+
+			// With auth.type set and no stored login, session/new blocks on a browser login it opens by itself.
+			// That would undo a logout on the next spawn, so a missing login stays "needs sign-in" instead.
+			if (GeminiKey.IsEmpty() && !PlatformFile.FileExists(*FPaths::Combine(SettingsDir, TEXT("acp_token.json"))))
+			{
+				FString SeededSettings;
+				TSharedPtr<FJsonObject> SettingsObj;
+				if (FFileHelper::LoadFileToString(SeededSettings, *SettingsFile) && SeededSettings.Contains(TEXT("oauth-personal"))
+					&& FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(SeededSettings), SettingsObj) && SettingsObj.IsValid())
+				{
+					SettingsObj->RemoveField(TEXT("auth"));
+					FString Cleared;
+					const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Cleared);
+					FJsonSerializer::Serialize(SettingsObj.ToSharedRef(), Writer);
+					FFileHelper::SaveStringToFile(Cleared, *SettingsFile);
+				}
+				return;
+			}
+
+			const FString AuthType = (!GeminiKey.IsEmpty()) ? TEXT("gemini-api-key") : TEXT("oauth-personal");
+			const FString JsonContent = FString::Printf(TEXT("{\n  \"auth\": {\n    \"type\": \"%s\"\n  }\n}\n"), *AuthType);
+
+			FString ExistingContent;
+			if (!FFileHelper::LoadFileToString(ExistingContent, *SettingsFile) || !ExistingContent.Contains(AuthType))
+			{
+				FFileHelper::SaveStringToFile(JsonContent, *SettingsFile);
+			}
+		}
+	}
+
 	void AppendAgentModelMessage(
 		TArray<TSharedPtr<FJsonValue>>& History,
 		const FString& Text)
@@ -1515,6 +1604,8 @@ void FUECPAgentRunnerCoordinator::SpawnACPInstance(const FString& ChatID, FAgent
 	}
 	FPlatformMisc::SetEnvironmentVar(TEXT("NO_COLOR"), TEXT("1"));
 
+	EnsureAntigravityConfigured(Config.ProviderName);
+
 	const FString ChatIDCopy  = ChatID;
 	const FString CmdCopy     = Config.ACPCommand;
 	const FString ProvCopy    = Config.ProviderName;
@@ -1643,6 +1734,29 @@ void FUECPAgentRunnerCoordinator::DiscoverAgentConfig(const FString& AgentId)
 	auto W = Shell.Pin();
 	if (!W.IsValid()) return;
 
+	// Pre-seed cached config from hardcoded models if missing so UI can show models immediately
+	if (!W->CachedAgentConfigs.Contains(AgentId))
+	{
+		TArray<FString> HardcodedModels = FProviderConfigManager::Get().GetAgentModels(AgentId);
+		if (HardcodedModels.Num() == 0 && AgentId.EndsWith(TEXT("-acp")))
+		{
+			HardcodedModels = FProviderConfigManager::Get().GetAgentModels(AgentId.LeftChop(4));
+		}
+		if (HardcodedModels.Num() > 0)
+		{
+			FUECPACPAgentConfigSnapshot Preseed;
+			Preseed.AgentId = AgentId;
+			Preseed.CurrentModel = HardcodedModels[0];
+			for (const FString& M : HardcodedModels)
+			{
+				Preseed.Models.Add({ M, M, TEXT("") });
+			}
+			W->CachedAgentConfigs.Add(AgentId, Preseed);
+			if (W->SettingsBridgeObject) W->SettingsBridgeObject->PushACPAgentConfig(AgentId);
+			if (W->AppBridgeObject) W->AppBridgeObject->PushModelPicker();
+		}
+	}
+
 	IUECPACPRegistryService& Reg = IUECPCoreModule::Get().GetACPRegistryService();
 	const FUECPACPInstallMarker Marker = Reg.GetInstallMarker(AgentId);
 	if (Marker.AgentId.IsEmpty() || Marker.EntrypointCommand.IsEmpty())
@@ -1716,6 +1830,29 @@ void FUECPAgentRunnerCoordinator::DiscoverAgentConfig(const FString& AgentId)
 			State.bRequired = true;
 			State.MethodId  = MethodId;
 			W2->AgentAuthStates.Add(AgentIdCopy, State);
+
+			if (!W2->CachedAgentConfigs.Contains(AgentIdCopy))
+			{
+				TArray<FString> DefModels = FProviderConfigManager::Get().GetAgentModels(AgentIdCopy);
+				if (DefModels.Num() == 0 && AgentIdCopy.EndsWith(TEXT("-acp")))
+				{
+					DefModels = FProviderConfigManager::Get().GetAgentModels(AgentIdCopy.LeftChop(4));
+				}
+				if (DefModels.Num() > 0)
+				{
+					FUECPACPAgentConfigSnapshot Preseed;
+					Preseed.AgentId = AgentIdCopy;
+					Preseed.CurrentModel = DefModels[0];
+					for (const FString& MId : DefModels)
+					{
+						Preseed.Models.Add({ MId, MId, TEXT("") });
+					}
+					W2->CachedAgentConfigs.Add(AgentIdCopy, Preseed);
+					if (W2->SettingsBridgeObject) W2->SettingsBridgeObject->PushACPAgentConfig(AgentIdCopy);
+					if (W2->AppBridgeObject) W2->AppBridgeObject->PushModelPicker();
+				}
+			}
+
 			if (W2->SettingsBridgeObject) W2->SettingsBridgeObject->PushACPCatalog();
 			UE_LOG(LogUECPACP, Log,
 				TEXT("Discovery: '%s' requires sign-in (methodId='%s') — flagged in catalog"),
@@ -1729,6 +1866,8 @@ void FUECPAgentRunnerCoordinator::DiscoverAgentConfig(const FString& AgentId)
 	FString ExistingRustLog = FPlatformMisc::GetEnvironmentVariable(TEXT("RUST_LOG"));
 	if (ExistingRustLog.IsEmpty()) FPlatformMisc::SetEnvironmentVar(TEXT("RUST_LOG"), TEXT("error"));
 	FPlatformMisc::SetEnvironmentVar(TEXT("NO_COLOR"), TEXT("1"));
+
+	EnsureAntigravityConfigured(AgentId);
 
 	const double SpawnRequestTime = FPlatformTime::Seconds();
 	Async(EAsyncExecution::Thread, [Session, Args, AgentIdCopy, SpawnRequestTime, bGotSlashCommands, ReadyAt]() mutable
@@ -1769,6 +1908,529 @@ void FUECPAgentRunnerCoordinator::DiscoverAgentConfig(const FString& AgentId)
 				0.1f);
 		});
 	});
+}
+
+struct FUECPAgentRunnerCoordinator::FAgentAuthOp
+{
+	FString AgentId;
+	FString Kind;
+	FString MethodId;
+	FString AfterOp;
+	FString CarriedError;
+
+	TSharedPtr<FUECPACPSession> Session;
+	FProcHandle                 TerminalProc;
+	FTSTicker::FDelegateHandle  Ticker;
+
+	double Deadline = 0.0;
+	double ReadyAt  = 0.0;
+	bool   bStarted  = false;
+	bool   bFinished = false;
+
+	bool bGotCaps      = false;
+	bool bLogout       = false;
+	bool bPushesStatus = false;
+	TArray<FUECPACPAuthMethod> Methods;
+
+	bool    bGotStatus = false;
+	FString StatusKind;
+	FString Email;
+	FString Label;
+	FString TierName;
+
+	FString SessionError;
+	int32   SessionErrorCode = 0;
+	FString Error;
+};
+
+namespace
+{
+	const TCHAR* const AuthOpProbe  = TEXT("probe");
+	const TCHAR* const AuthOpLogin  = TEXT("login");
+	const TCHAR* const AuthOpLogout = TEXT("logout");
+
+	bool IsAuthFailureMessage(const FString& Message)
+	{
+		for (const TCHAR* Needle : { TEXT("auth"), TEXT("api key"), TEXT("credential"), TEXT("log in"), TEXT("login"), TEXT("sign in") })
+		{
+			if (Message.Contains(Needle, ESearchCase::IgnoreCase)) return true;
+		}
+		return false;
+	}
+
+	FString ExtractLoginUrl(const FString& Line)
+	{
+		const bool bLooksLikeLogin = Line.Contains(TEXT("authenticate"), ESearchCase::IgnoreCase)
+			|| Line.Contains(TEXT("log in"), ESearchCase::IgnoreCase)
+			|| Line.Contains(TEXT("login"), ESearchCase::IgnoreCase)
+			|| Line.Contains(TEXT("sign in"), ESearchCase::IgnoreCase);
+		const int32 Start = Line.Find(TEXT("https://"));
+		if (!bLooksLikeLogin || Start == INDEX_NONE) return FString();
+
+		FString Url = Line.Mid(Start);
+		for (int32 i = 0; i < Url.Len(); ++i)
+		{
+			if (FChar::IsWhitespace(Url[i])) { Url.LeftInline(i); break; }
+		}
+		return Url;
+	}
+}
+
+FUECPAgentRunnerCoordinator::~FUECPAgentRunnerCoordinator()
+{
+	TArray<FString> AgentIds;
+	AuthOps.GetKeys(AgentIds);
+	for (const FString& AgentId : AgentIds) AbortAuthOp(AgentId);
+}
+
+const FUECPACPAuthStatus* FUECPAgentRunnerCoordinator::GetAgentAuthStatus(const FString& AgentId) const
+{
+	return AuthStatuses.Find(AgentId);
+}
+
+void FUECPAgentRunnerCoordinator::PushAgentAuthStatus(const FString& AgentId)
+{
+	if (auto W = Shell.Pin())
+	{
+		if (W->SettingsBridgeObject) W->SettingsBridgeObject->PushACPAuthStatus(AgentId);
+	}
+}
+
+void FUECPAgentRunnerCoordinator::FailAuthRequest(const FString& AgentId, const FString& Message)
+{
+	FUECPACPAuthStatus& Status = AuthStatuses.FindOrAdd(AgentId);
+	Status.BusyOp.Empty();
+	Status.Error = Message;
+	PushAgentAuthStatus(AgentId);
+}
+
+void FUECPAgentRunnerCoordinator::ProbeAgentAuth(const FString& AgentId)
+{
+	if (AuthOps.Contains(AgentId))
+	{
+		PushAgentAuthStatus(AgentId);
+		return;
+	}
+	StartAuthOp(AgentId, AuthOpProbe, FString());
+}
+
+bool FUECPAgentRunnerCoordinator::StopIdleChatsForAgent(const FString& AgentId)
+{
+	TSharedPtr<SUECPMainWidget> W = Shell.Pin();
+	if (!W.IsValid()) return true;
+
+	TArray<FString> ChatIDs;
+	for (const auto& Pair : W->AgentInstances)
+	{
+		if (Pair.Value->ProviderName != AgentId || !Pair.Value->ACPSession.IsValid()) continue;
+		if (Pair.Value->ACPSession->GetState() == FUECPACPSession::EState::Prompting) return false;
+		ChatIDs.Add(Pair.Key);
+	}
+	// Live sessions keep the old credentials in memory; the next prompt spawns under the new login.
+	for (const FString& ChatID : ChatIDs) StopAgentForChat(ChatID);
+	return true;
+}
+
+void FUECPAgentRunnerCoordinator::LoginAgent(const FString& AgentId, const FString& MethodId)
+{
+	const FUECPACPAuthStatus* Status = AuthStatuses.Find(AgentId);
+	const FUECPACPAuthMethod* Method = nullptr;
+	if (Status)
+	{
+		Method = MethodId.IsEmpty() ? (Status->Methods.Num() > 0 ? &Status->Methods[0] : nullptr)
+			: Status->Methods.FindByPredicate([&](const FUECPACPAuthMethod& M) { return M.Id == MethodId; });
+	}
+	if (!Method)
+	{
+		FailAuthRequest(AgentId, TEXT("Este agente não informou um método de login. Clique em Atualizar e tente de novo."));
+		return;
+	}
+	if (!StopIdleChatsForAgent(AgentId))
+	{
+		FailAuthRequest(AgentId, TEXT("Há um turno em andamento neste agente. Aguarde terminar ou pare o chat antes de logar."));
+		return;
+	}
+
+	if (Method->bTerminal)
+	{
+		const FUECPACPAuthMethod MethodCopy = *Method;
+		StartTerminalLogin(AgentId, MethodCopy);
+	}
+	else
+	{
+		const FString Id = Method->Id;
+		StartAuthOp(AgentId, AuthOpLogin, Id);
+	}
+}
+
+void FUECPAgentRunnerCoordinator::LogoutAgent(const FString& AgentId)
+{
+	if (!StopIdleChatsForAgent(AgentId))
+	{
+		FailAuthRequest(AgentId, TEXT("Há um turno em andamento neste agente. Aguarde terminar ou pare o chat antes de deslogar."));
+		return;
+	}
+	StartAuthOp(AgentId, AuthOpLogout, FString());
+}
+
+void FUECPAgentRunnerCoordinator::CancelAgentAuth(const FString& AgentId)
+{
+	const TSharedPtr<FAgentAuthOp>* Found = AuthOps.Find(AgentId);
+	if (!Found) return;
+	const bool bWasLogin = (*Found)->Kind == AuthOpLogin;
+	AbortAuthOp(AgentId);
+
+	if (bWasLogin)
+	{
+		StartAuthOp(AgentId, AuthOpProbe, FString());
+	}
+	else
+	{
+		AuthStatuses.FindOrAdd(AgentId).BusyOp.Empty();
+		PushAgentAuthStatus(AgentId);
+	}
+}
+
+void FUECPAgentRunnerCoordinator::AbortAuthOp(const FString& AgentId)
+{
+	TSharedPtr<FAgentAuthOp> Op;
+	if (!AuthOps.RemoveAndCopyValue(AgentId, Op)) return;
+
+	if (Op->Ticker.IsValid()) FTSTicker::GetCoreTicker().RemoveTicker(Op->Ticker);
+	// A session still inside Start() is stopped by its own continuation once the op is gone.
+	if (Op->Session.IsValid() && Op->bStarted) Op->Session->Stop();
+	if (Op->TerminalProc.IsValid())
+	{
+		FPlatformProcess::TerminateProc(Op->TerminalProc, true);
+		FPlatformProcess::CloseProc(Op->TerminalProc);
+	}
+}
+
+void FUECPAgentRunnerCoordinator::AddAuthOpTicker(const TSharedPtr<FAgentAuthOp>& Op)
+{
+	TWeakPtr<FAgentAuthOp> WeakOp = Op;
+	Op->Ticker = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([this, WeakOp](float ) -> bool
+		{
+			const TSharedPtr<FAgentAuthOp> Pinned = WeakOp.Pin();
+			return Pinned.IsValid() && TickAuthOp(Pinned);
+		}),
+		0.1f);
+}
+
+void FUECPAgentRunnerCoordinator::StartTerminalLogin(const FString& AgentId, const FUECPACPAuthMethod& Method)
+{
+	AbortAuthOp(AgentId);
+
+	IUECPACPRegistryService& Reg = IUECPCoreModule::Get().GetACPRegistryService();
+	const FUECPACPInstallMarker Marker = Reg.GetInstallMarker(AgentId);
+
+	FString Command = Method.TerminalCommand;
+	TArray<FString> CmdArgs;
+	if (Command.IsEmpty())
+	{
+		Command = Marker.EntrypointCommand;
+		CmdArgs = Marker.EntrypointArgs;
+	}
+	CmdArgs.Append(Method.TerminalArgs);
+
+	FString Params;
+	for (const FString& A : CmdArgs)
+	{
+		if (!Params.IsEmpty()) Params.AppendChar(TEXT(' '));
+		Params += A.Contains(TEXT(" ")) ? FString::Printf(TEXT("\"%s\""), *A) : A;
+	}
+
+	// Not detached: the agent's console window is what the user signs in through.
+	FProcHandle Proc = FPlatformProcess::CreateProc(*Command, *Params, false, false, false,
+		nullptr, 0, nullptr, nullptr, nullptr);
+	if (!Proc.IsValid())
+	{
+		FailAuthRequest(AgentId, TEXT("Não foi possível abrir a janela de login do agente."));
+		return;
+	}
+
+	const TSharedPtr<FAgentAuthOp> Op = MakeShared<FAgentAuthOp>();
+	Op->AgentId      = AgentId;
+	Op->Kind         = AuthOpLogin;
+	Op->MethodId     = Method.Id;
+	Op->TerminalProc = Proc;
+	Op->bStarted     = true;
+	Op->Deadline     = FPlatformTime::Seconds() + 600.0;
+	AuthOps.Add(AgentId, Op);
+
+	FUECPACPAuthStatus& Status = AuthStatuses.FindOrAdd(AgentId);
+	Status.BusyOp = AuthOpLogin;
+	Status.Error.Empty();
+	Status.LoginUrl.Empty();
+	PushAgentAuthStatus(AgentId);
+
+	AddAuthOpTicker(Op);
+}
+
+void FUECPAgentRunnerCoordinator::StartAuthOp(const FString& AgentId, const FString& Kind, const FString& MethodId,
+	const FString& AfterOp, const FString& CarriedError)
+{
+	AbortAuthOp(AgentId);
+
+	FUECPACPAuthStatus& Status = AuthStatuses.FindOrAdd(AgentId);
+	IUECPACPRegistryService& Reg = IUECPCoreModule::Get().GetACPRegistryService();
+	const FUECPACPInstallMarker Marker = Reg.GetInstallMarker(AgentId);
+	if (Marker.AgentId.IsEmpty() || Marker.EntrypointCommand.IsEmpty())
+	{
+		Status.State = EUECPACPAuthState::Unknown;
+		FailAuthRequest(AgentId, TEXT("Agente não instalado."));
+		return;
+	}
+
+	Status.BusyOp = Kind;
+	Status.Error  = CarriedError;
+	if (Kind == AuthOpLogin) Status.LoginUrl.Empty();
+	PushAgentAuthStatus(AgentId);
+
+	const TSharedPtr<FAgentAuthOp> Op = MakeShared<FAgentAuthOp>();
+	Op->AgentId      = AgentId;
+	Op->Kind         = Kind;
+	Op->MethodId     = MethodId;
+	Op->AfterOp      = AfterOp;
+	Op->CarriedError = CarriedError;
+	Op->Deadline     = FPlatformTime::Seconds() + (Kind == AuthOpLogin ? 300.0 : 45.0);
+	Op->Session      = MakeShared<FUECPACPSession>();
+	AuthOps.Add(AgentId, Op);
+
+	// The op owns the session and is only destroyed outside its Tick, so a raw pointer is safe in these delegates.
+	FAgentAuthOp* Raw = Op.Get();
+	Op->Session->OnAuthCapabilities.BindLambda(
+		[Raw](const TArray<FUECPACPAuthMethod>& Methods, bool bLogout, bool bPushesStatus)
+		{
+			Raw->Methods       = Methods;
+			Raw->bLogout       = bLogout;
+			Raw->bPushesStatus = bPushesStatus;
+			Raw->bGotCaps      = true;
+
+			TFunction<void(const FString&)> Done = [Raw](const FString& Error)
+			{
+				Raw->Error     = Error;
+				Raw->bFinished = true;
+			};
+
+			if (Raw->Kind == AuthOpProbe)
+			{
+				Raw->Session->RequestSessionNew();
+			}
+			else if (Raw->Kind == AuthOpLogin)
+			{
+				const TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+				Params->SetStringField(TEXT("methodId"), Raw->MethodId);
+				Raw->Session->SendAuthRequest(TEXT("authenticate"), Params, MoveTemp(Done));
+			}
+			else if (!bLogout)
+			{
+				Done(TEXT("Este agente não oferece logout pelo protocolo."));
+			}
+			else
+			{
+				Raw->Session->SendAuthRequest(TEXT("logout"), MakeShared<FJsonObject>(), MoveTemp(Done));
+			}
+		});
+	Op->Session->OnAuthStatusUpdate.BindLambda([Raw](const FString& Kind, const FString& Email, const FString& Label)
+	{
+		Raw->bGotStatus = true;
+		Raw->StatusKind = Kind;
+		Raw->Email      = Email;
+		Raw->Label      = Label;
+	});
+	Op->Session->OnAuthSessionReady.BindLambda([Raw](const FString& TierName)
+	{
+		Raw->TierName = TierName;
+		Raw->ReadyAt  = FPlatformTime::Seconds();
+	});
+	Op->Session->OnAuthSessionFailed.BindLambda([Raw](const FString& Message, int32 Code)
+	{
+		Raw->SessionError     = Message;
+		Raw->SessionErrorCode = Code;
+		Raw->bFinished        = true;
+	});
+	Op->Session->OnStderrLine.BindLambda([this, Raw](const FString& Line)
+	{
+		if (Raw->Kind != AuthOpLogin) return;
+		FUECPACPAuthStatus* S = AuthStatuses.Find(Raw->AgentId);
+		if (!S || !S->LoginUrl.IsEmpty()) return;
+		S->LoginUrl = ExtractLoginUrl(Line);
+		if (!S->LoginUrl.IsEmpty()) PushAgentAuthStatus(Raw->AgentId);
+	});
+
+	FUECPACPSession::FSpawnArgs Args;
+	Args.Command = Marker.EntrypointCommand;
+	Args.Args    = Marker.EntrypointArgs;
+	Args.Cwd     = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+	Args.Cwd.ReplaceInline(TEXT("\\"), TEXT("/"));
+	Args.LogTag  = FString::Printf(TEXT("%s-auth"), *AgentId);
+	Args.bAuthConnection = true;
+
+	FPlatformMisc::SetEnvironmentVar(TEXT("CLAUDECODE"), nullptr);
+	FPlatformMisc::SetEnvironmentVar(TEXT("CLAUDE_CODE_ENTRYPOINT"), nullptr);
+	FPlatformMisc::SetEnvironmentVar(TEXT("NO_COLOR"), TEXT("1"));
+	EnsureAntigravityConfigured(AgentId);
+
+	TSharedPtr<FUECPACPSession> Session = Op->Session;
+	TWeakPtr<FAgentAuthOp> WeakOp = Op;
+	Async(EAsyncExecution::Thread, [this, Session, Args, WeakOp]()
+	{
+		const bool bSpawned = Session->Start(Args);
+		AsyncTask(ENamedThreads::GameThread, [this, Session, WeakOp, bSpawned]()
+		{
+			const TSharedPtr<FAgentAuthOp> Pinned = WeakOp.Pin();
+			if (!Pinned.IsValid())
+			{
+				if (bSpawned) Session->Stop();
+				return;
+			}
+			Pinned->bStarted = true;
+			if (bSpawned)
+			{
+				AddAuthOpTicker(Pinned);
+				return;
+			}
+			Pinned->Error = TEXT("Não foi possível iniciar o agente.");
+			FinishAuthOp(Pinned);
+		});
+	});
+}
+
+bool FUECPAgentRunnerCoordinator::TickAuthOp(const TSharedPtr<FAgentAuthOp>& Op)
+{
+	const double Now = FPlatformTime::Seconds();
+
+	if (Op->TerminalProc.IsValid())
+	{
+		if (FPlatformProcess::IsProcRunning(Op->TerminalProc))
+		{
+			if (Now <= Op->Deadline) return true;
+			FPlatformProcess::TerminateProc(Op->TerminalProc, true);
+			Op->Error = TEXT("O login expirou.");
+		}
+		else
+		{
+			int32 ExitCode = 0;
+			FPlatformProcess::GetProcReturnCode(Op->TerminalProc, &ExitCode);
+			if (ExitCode != 0) Op->Error = FString::Printf(TEXT("O login terminou com o código %d."), ExitCode);
+		}
+		FPlatformProcess::CloseProc(Op->TerminalProc);
+		Op->TerminalProc.Reset();
+		FinishAuthOp(Op);
+		return false;
+	}
+
+	const bool bAlive = Op->Session->Tick();
+
+	// An agent that pushes its identity gets a moment after session/new to do so.
+	if (Op->ReadyAt > 0.0 && !Op->bFinished
+		&& (!Op->bPushesStatus || Op->bGotStatus || Now - Op->ReadyAt >= 4.0))
+	{
+		Op->bFinished = true;
+	}
+	if (!Op->bFinished && !bAlive)
+	{
+		Op->bFinished = true;
+		Op->Error = TEXT("O agente encerrou antes de responder.");
+	}
+	if (!Op->bFinished && Now > Op->Deadline)
+	{
+		Op->bFinished = true;
+		Op->Error = Op->Kind == AuthOpLogin
+			? TEXT("O login não foi concluído a tempo.")
+			: TEXT("O agente não respondeu a tempo.");
+	}
+	if (!Op->bFinished) return true;
+
+	FinishAuthOp(Op);
+	return false;
+}
+
+void FUECPAgentRunnerCoordinator::FinishAuthOp(const TSharedPtr<FAgentAuthOp>& Op)
+{
+	const FString AgentId = Op->AgentId;
+	AuthOps.Remove(AgentId);
+	if (Op->Session.IsValid()) Op->Session->Stop();
+
+	UE_LOG(LogUECPACP, Log, TEXT("Agent auth op '%s' finished for '%s'%s"),
+		*Op->Kind, *AgentId, Op->Error.IsEmpty() ? TEXT("") : TEXT(" with an error"));
+
+	if (Op->Kind != AuthOpProbe)
+	{
+		StartAuthOp(AgentId, AuthOpProbe, FString(), Op->Kind, Op->Error);
+		return;
+	}
+
+	FUECPACPAuthStatus& Status = AuthStatuses.FindOrAdd(AgentId);
+	Status.BusyOp.Empty();
+	Status.LastProbeAt = FPlatformTime::Seconds();
+	Status.Error = Op->CarriedError;
+	Status.Email.Empty();
+	Status.Plan.Empty();
+	if (Op->bGotCaps)
+	{
+		Status.Methods         = Op->Methods;
+		Status.bSupportsLogout = Op->bLogout;
+	}
+
+	if (Op->bGotStatus && Op->StatusKind == TEXT("none"))
+	{
+		Status.State = EUECPACPAuthState::Disconnected;
+	}
+	else if (Op->bGotStatus || Op->ReadyAt > 0.0)
+	{
+		Status.State = EUECPACPAuthState::Connected;
+		Status.Email = Op->Email;
+		Status.Plan  = Op->Label.IsEmpty() ? Op->TierName : Op->Label;
+		if (Status.Plan.IsEmpty() && AgentId.Contains(TEXT("antigravity"), ESearchCase::IgnoreCase)
+			&& !FPlatformMisc::GetEnvironmentVariable(TEXT("GEMINI_API_KEY")).IsEmpty())
+		{
+			Status.Plan = TEXT("Chave de API do Gemini");
+		}
+	}
+	else if (!Op->SessionError.IsEmpty() && Op->SessionErrorCode == -32000 && IsAuthFailureMessage(Op->SessionError))
+	{
+		Status.State = EUECPACPAuthState::Disconnected;
+	}
+	else
+	{
+		Status.State = EUECPACPAuthState::Unknown;
+		if (Status.Error.IsEmpty()) Status.Error = Op->SessionError.IsEmpty() ? Op->Error : Op->SessionError;
+	}
+
+	if (Status.Error.IsEmpty() && Op->AfterOp == AuthOpLogin && Status.State == EUECPACPAuthState::Disconnected)
+	{
+		Status.Error = TEXT("O login terminou, mas o agente continua desconectado.");
+	}
+	if (Status.Error.IsEmpty() && Op->AfterOp == AuthOpLogout && Status.State == EUECPACPAuthState::Connected)
+	{
+		Status.Error = TEXT("O agente continua conectado: a sessão pode vir de uma chave de API ou variável de ambiente.");
+	}
+
+	const EUECPACPAuthState State = Status.State;
+	PushAgentAuthStatus(AgentId);
+
+	auto W = Shell.Pin();
+	if (!W.IsValid()) return;
+
+	const bool bFlagged = W->AgentAuthStates.Contains(AgentId);
+	if (State == EUECPACPAuthState::Disconnected && !bFlagged)
+	{
+		SUECPMainWidget::FACPAgentAuthState Required;
+		Required.bRequired = true;
+		W->AgentAuthStates.Add(AgentId, Required);
+		if (W->SettingsBridgeObject) W->SettingsBridgeObject->PushACPCatalog();
+		if (W->AppBridgeObject) W->AppBridgeObject->PushModelPicker();
+	}
+	else if (State == EUECPACPAuthState::Connected && (bFlagged || Op->AfterOp == AuthOpLogin))
+	{
+		W->AgentAuthStates.Remove(AgentId);
+		W->AgentDiscoveryAttempted.Add(AgentId);
+		if (W->SettingsBridgeObject) W->SettingsBridgeObject->PushACPCatalog();
+		DiscoverAgentConfig(AgentId);
+	}
 }
 
 bool FUECPAgentRunnerCoordinator::OnACPInstanceTick(TSharedPtr<FAgentRunnerInstance> Inst)
