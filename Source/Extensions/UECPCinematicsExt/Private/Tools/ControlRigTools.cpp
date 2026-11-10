@@ -521,7 +521,7 @@ static void AddRigControlImpl(const FString& AssetPath, const FString& ControlNa
 		ParentKey = FRigElementKey(FName(*ParentBone), ERigElementType::Bone);
 		if (!Hier->Contains(ParentKey))
 		{
-			const int32 BoneCount = Hier->GetBones().Num();
+			const int32 BoneCount = Hier->GetBoneElements().Num();
 			OutError = FString::Printf(
 				TEXT("parent_bone '%s' not found in the rig hierarchy (bone_count=%d). %s"),
 				*ParentBone, BoneCount,
@@ -841,13 +841,15 @@ static FString AnimationTypeToString(ERigControlAnimationType InType)
 static TSharedRef<FJsonObject> BuildControlInfoJson(const URigHierarchy* Hierarchy, FRigControlElement* Ctrl)
 {
 	TSharedRef<FJsonObject> O = MakeShared<FJsonObject>();
+	// UE 5.9: FRigControlElement::Settings is deprecated; take a combined copy from the hierarchy.
+	const FRigControlSettings CtrlSettings = Hierarchy->MakeControlSettings(Ctrl);
 	O->SetStringField(TEXT("name"), Ctrl->GetName());
-	O->SetStringField(TEXT("type"), ControlTypeToString(Ctrl->Settings.ControlType));
-	O->SetStringField(TEXT("animation_type"), AnimationTypeToString(Ctrl->Settings.AnimationType));
-	O->SetStringField(TEXT("display_name"), Ctrl->Settings.DisplayName.ToString());
-	O->SetStringField(TEXT("shape_name"), Ctrl->Settings.ShapeName.ToString());
-	O->SetStringField(TEXT("shape_color"), Ctrl->Settings.ShapeColor.ToString());
-	O->SetBoolField  (TEXT("shape_visible"), Ctrl->Settings.bShapeVisible);
+	O->SetStringField(TEXT("type"), ControlTypeToString(CtrlSettings.ControlType));
+	O->SetStringField(TEXT("animation_type"), AnimationTypeToString(CtrlSettings.AnimationType));
+	O->SetStringField(TEXT("display_name"), CtrlSettings.DisplayName.ToString());
+	O->SetStringField(TEXT("shape_name"), CtrlSettings.ShapeName.ToString());
+	O->SetStringField(TEXT("shape_color"), CtrlSettings.ShapeColor.ToString());
+	O->SetBoolField  (TEXT("shape_visible"), CtrlSettings.bShapeVisible);
 	{
 		const FRigElementKey ParentKey = Hierarchy->GetFirstParent(Ctrl->GetKey());
 		if (ParentKey.IsValid())
@@ -867,11 +869,11 @@ static TSharedRef<FJsonObject> BuildControlInfoJson(const URigHierarchy* Hierarc
 	O->SetStringField(TEXT("shape_transform"),  ShapeXf.ToString());
 	O->SetStringField(TEXT("initial_global_transform"), GlobalXf.ToString());
 
-	O->SetBoolField(TEXT("draw_limits"), Ctrl->Settings.bDrawLimits);
+	O->SetBoolField(TEXT("draw_limits"), CtrlSettings.bDrawLimits);
 	{
 		TArray<TSharedPtr<FJsonValue>> LimitFlags;
 		bool bAnyLimit = false;
-		for (const FRigControlLimitEnabled& L : Ctrl->Settings.LimitEnabled)
+		for (const FRigControlLimitEnabled& L : CtrlSettings.LimitEnabled)
 		{
 			const bool bOn = L.bMinimum || L.bMaximum;
 			bAnyLimit |= bOn;
@@ -880,16 +882,16 @@ static TSharedRef<FJsonObject> BuildControlInfoJson(const URigHierarchy* Hierarc
 		O->SetArrayField(TEXT("limit_enabled"), LimitFlags);
 		if (bAnyLimit)
 		{
-			const ERigControlType CT = Ctrl->Settings.ControlType;
+			const ERigControlType CT = CtrlSettings.ControlType;
 			if (CT == ERigControlType::Float || CT == ERigControlType::ScaleFloat)
 			{
-				O->SetNumberField(TEXT("minimum_value"), Ctrl->Settings.MinimumValue.Get<float>());
-				O->SetNumberField(TEXT("maximum_value"), Ctrl->Settings.MaximumValue.Get<float>());
+				O->SetNumberField(TEXT("minimum_value"), CtrlSettings.MinimumValue.Get<float>());
+				O->SetNumberField(TEXT("maximum_value"), CtrlSettings.MaximumValue.Get<float>());
 			}
 			else if (CT == ERigControlType::Integer)
 			{
-				O->SetNumberField(TEXT("minimum_value"), Ctrl->Settings.MinimumValue.Get<int32>());
-				O->SetNumberField(TEXT("maximum_value"), Ctrl->Settings.MaximumValue.Get<int32>());
+				O->SetNumberField(TEXT("minimum_value"), CtrlSettings.MinimumValue.Get<int32>());
+				O->SetNumberField(TEXT("maximum_value"), CtrlSettings.MaximumValue.Get<int32>());
 			}
 		}
 	}
@@ -939,7 +941,7 @@ void HandleGetControlRigSummary(const FString& AssetPath,
 	{
 		TArray<TSharedPtr<FJsonValue>> Bones, Controls, Nulls, Sockets, Curves;
 
-		for (FRigBoneElement* E : Hierarchy->GetBones())
+		for (FRigBoneElement* E : Hierarchy->GetBoneElements())
 		{
 			TSharedRef<FJsonObject> O = MakeShared<FJsonObject>();
 			O->SetStringField(TEXT("name"), E->GetName());
@@ -947,11 +949,11 @@ void HandleGetControlRigSummary(const FString& AssetPath,
 			if (P.IsValid()) O->SetStringField(TEXT("parent"), P.Name.ToString());
 			Bones.Add(MakeShared<FJsonValueObject>(O));
 		}
-		for (FRigControlElement* C : Hierarchy->GetControls())
+		for (FRigControlElement* C : Hierarchy->GetControlElements())
 		{
 			Controls.Add(MakeShared<FJsonValueObject>(BuildControlInfoJson(Hierarchy, C)));
 		}
-		for (FRigNullElement* E : Hierarchy->GetNulls())
+		for (FRigNullElement* E : Hierarchy->GetNullElements())
 		{
 			TSharedRef<FJsonObject> O = MakeShared<FJsonObject>();
 			O->SetStringField(TEXT("name"), E->GetName());
@@ -959,7 +961,7 @@ void HandleGetControlRigSummary(const FString& AssetPath,
 			if (P.IsValid()) O->SetStringField(TEXT("parent"), P.Name.ToString());
 			Nulls.Add(MakeShared<FJsonValueObject>(O));
 		}
-		for (FRigSocketElement* E : Hierarchy->GetSockets())
+		for (FRigSocketElement* E : Hierarchy->GetSocketElements())
 		{
 			TSharedRef<FJsonObject> O = MakeShared<FJsonObject>();
 			O->SetStringField(TEXT("name"), E->GetName());
@@ -967,7 +969,7 @@ void HandleGetControlRigSummary(const FString& AssetPath,
 			if (P.IsValid()) O->SetStringField(TEXT("parent"), P.Name.ToString());
 			Sockets.Add(MakeShared<FJsonValueObject>(O));
 		}
-		for (FRigCurveElement* E : Hierarchy->GetCurves())
+		for (FRigCurveElement* E : Hierarchy->GetCurveElements())
 		{
 			TSharedRef<FJsonObject> O = MakeShared<FJsonObject>();
 			O->SetStringField(TEXT("name"), E->GetName());
@@ -1884,7 +1886,7 @@ void HandleSetRigControlProperties(const FString& AssetPath, const FString& Cont
 	FRigControlElement* ControlElement = Hier->Find<FRigControlElement>(ControlKey);
 	if (!ControlElement) { OutError = FString::Printf(TEXT("Could not access control element '%s'."), *ControlName); return; }
 
-	FRigControlSettings Settings = ControlElement->Settings;
+	FRigControlSettings Settings = Hier->MakeControlSettings(ControlElement);
 
 	const FString P = PropertyName.ToLower().TrimStartAndEnd();
 	const FString V = PropertyValue.TrimStartAndEnd();
@@ -2904,7 +2906,7 @@ void HandleMirrorRigControlFromArgs(const TSharedPtr<FJsonObject>& Args, FString
 	MirrorOffset.SetTranslation(T);
 	MirrorOffset.SetRotation(Q.GetNormalized());
 
-	FRigControlSettings Settings = Source->Settings;
+	FRigControlSettings Settings = Hier->MakeControlSettings(Source);
 	Settings.DisplayName = FName(*MirrorName);
 	Settings.ShapeColor  = DefaultShapeColorForName(MirrorName);
 

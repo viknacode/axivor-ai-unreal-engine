@@ -1329,34 +1329,34 @@ void FUECPScannerCoordinator::SendChatRequest()
 	{
 		HttpRequest->SetURL(FHttpCommunicationManager::BuildOpenAIUrl());
 		HttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *ApiKeyToUse));
-		JsonPayload->SetStringField("model", FApiKeyManager::Get().GetActiveOpenAIModel());
+		JsonPayload->SetStringField(TEXT("model"), FApiKeyManager::Get().GetActiveOpenAIModel());
 
 		TArray<TSharedPtr<FJsonValue>> MessagesArray;
 		TSharedPtr<FJsonObject> SystemMessage = MakeShareable(new FJsonObject);
-		SystemMessage->SetStringField("role", "system");
-		SystemMessage->SetStringField("content", SystemPrompt);
+		SystemMessage->SetStringField(TEXT("role"), "system");
+		SystemMessage->SetStringField(TEXT("content"), SystemPrompt);
 		MessagesArray.Add(MakeShareable(new FJsonValueObject(SystemMessage)));
 
 		TSharedPtr<FJsonObject> UserMessage = MakeShareable(new FJsonObject);
-		UserMessage->SetStringField("role", "user");
+		UserMessage->SetStringField(TEXT("role"), "user");
 
 		TArray<TSharedPtr<FJsonValue>> ContentArray;
 		TSharedPtr<FJsonObject> TextPart = MakeShareable(new FJsonObject);
-		TextPart->SetStringField("type", "text");
-		TextPart->SetStringField("text", FinalUserPrompt);
+		TextPart->SetStringField(TEXT("type"), "text");
+		TextPart->SetStringField(TEXT("text"), FinalUserPrompt);
 		ContentArray.Add(MakeShareable(new FJsonValueObject(TextPart)));
 
 		for (const FAttachedImage& Image : ImagesFromHistory)
 		{
 			TSharedPtr<FJsonObject> ImagePart = MakeShareable(new FJsonObject);
-			ImagePart->SetStringField("type", "image_url");
+			ImagePart->SetStringField(TEXT("type"), "image_url");
 			TSharedPtr<FJsonObject> ImageUrl = MakeShareable(new FJsonObject);
-			ImageUrl->SetStringField("url", FString::Printf(TEXT("data:%s;base64,%s"), *Image.MimeType, *Image.Base64Data));
-			ImagePart->SetObjectField("image_url", ImageUrl);
+			ImageUrl->SetStringField(TEXT("url"), FString::Printf(TEXT("data:%s;base64,%s"), *Image.MimeType, *Image.Base64Data));
+			ImagePart->SetObjectField(TEXT("image_url"), ImageUrl);
 			ContentArray.Add(MakeShareable(new FJsonValueObject(ImagePart)));
 		}
 
-		UserMessage->SetArrayField("content", ContentArray);
+		UserMessage->SetArrayField(TEXT("content"), ContentArray);
 		MessagesArray.Add(MakeShareable(new FJsonValueObject(UserMessage)));
 
 		JsonPayload->SetArrayField(TEXT("messages"), MessagesArray);
@@ -1375,23 +1375,23 @@ void FUECPScannerCoordinator::SendChatRequest()
 		UserMessage->SetStringField(TEXT("role"), TEXT("user"));
 		TArray<TSharedPtr<FJsonValue>> ContentArray;
 		TSharedPtr<FJsonObject> TextPart = MakeShareable(new FJsonObject);
-		TextPart->SetStringField("type", "text");
-		TextPart->SetStringField("text", FinalUserPrompt);
+		TextPart->SetStringField(TEXT("type"), "text");
+		TextPart->SetStringField(TEXT("text"), FinalUserPrompt);
 		ContentArray.Add(MakeShareable(new FJsonValueObject(TextPart)));
 
 		for (const FAttachedImage& Image : ImagesFromHistory)
 		{
 			TSharedPtr<FJsonObject> ImagePart = MakeShareable(new FJsonObject);
-			ImagePart->SetStringField("type", "image");
+			ImagePart->SetStringField(TEXT("type"), "image");
 			TSharedPtr<FJsonObject> Source = MakeShareable(new FJsonObject);
-			Source->SetStringField("type", "base64");
-			Source->SetStringField("media_type", Image.MimeType);
-			Source->SetStringField("data", Image.Base64Data);
-			ImagePart->SetObjectField("source", Source);
+			Source->SetStringField(TEXT("type"), "base64");
+			Source->SetStringField(TEXT("media_type"), Image.MimeType);
+			Source->SetStringField(TEXT("data"), Image.Base64Data);
+			ImagePart->SetObjectField(TEXT("source"), Source);
 			ContentArray.Add(MakeShareable(new FJsonValueObject(ImagePart)));
 		}
 
-		UserMessage->SetArrayField("content", ContentArray);
+		UserMessage->SetArrayField(TEXT("content"), ContentArray);
 		MessagesArray.Add(MakeShareable(new FJsonValueObject(UserMessage)));
 
 		JsonPayload->SetArrayField(TEXT("messages"), MessagesArray);
@@ -1404,13 +1404,13 @@ void FUECPScannerCoordinator::SendChatRequest()
 
 		TArray<TSharedPtr<FJsonValue>> MessagesArray;
 		TSharedPtr<FJsonObject> SystemMessage = MakeShareable(new FJsonObject);
-		SystemMessage->SetStringField("role", "system");
-		SystemMessage->SetStringField("content", SystemPrompt);
+		SystemMessage->SetStringField(TEXT("role"), "system");
+		SystemMessage->SetStringField(TEXT("content"), SystemPrompt);
 		MessagesArray.Add(MakeShareable(new FJsonValueObject(SystemMessage)));
 
 		TSharedPtr<FJsonObject> UserMessage = MakeShareable(new FJsonObject);
 		UserMessage->SetStringField(TEXT("role"), TEXT("user"));
-		UserMessage->SetStringField("content", FinalUserPrompt);
+		UserMessage->SetStringField(TEXT("content"), FinalUserPrompt);
 		MessagesArray.Add(MakeShareable(new FJsonValueObject(UserMessage)));
 
 		JsonPayload->SetArrayField(TEXT("messages"), MessagesArray);
@@ -1432,13 +1432,13 @@ void FUECPScannerCoordinator::SendChatRequest()
 
 		TArray<TSharedPtr<FJsonValue>> MessagesArray;
 		TSharedPtr<FJsonObject> SystemMessage = MakeShareable(new FJsonObject);
-		SystemMessage->SetStringField("role", "system");
-		SystemMessage->SetStringField("content", SystemPrompt);
+		SystemMessage->SetStringField(TEXT("role"), "system");
+		SystemMessage->SetStringField(TEXT("content"), SystemPrompt);
 		MessagesArray.Add(MakeShareable(new FJsonValueObject(SystemMessage)));
 
 		TSharedPtr<FJsonObject> UserMessage = MakeShareable(new FJsonObject);
 		UserMessage->SetStringField(TEXT("role"), TEXT("user"));
-		UserMessage->SetStringField("content", FinalUserPrompt);
+		UserMessage->SetStringField(TEXT("content"), FinalUserPrompt);
 		MessagesArray.Add(MakeShareable(new FJsonValueObject(UserMessage)));
 
 		JsonPayload->SetArrayField(TEXT("messages"), MessagesArray);

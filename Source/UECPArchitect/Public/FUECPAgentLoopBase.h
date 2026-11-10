@@ -77,7 +77,7 @@ public:
 	static bool TextEndsWithIntent(const FString& Text);
 
 	/** Upper bound on the serialised request history (chars). Mirrors the coordinator's window. */
-	static constexpr int32 MaxHistoryChars    = 320000;
+	static constexpr int32 MaxHistoryChars    = 200000;
 
 	/** Per tool result cap (chars) before it is appended to the request history. */
 	static constexpr int32 MaxToolResultChars = 16000;
@@ -101,9 +101,19 @@ protected:
 
 	/** Consecutive transient failures (429/5xx/transport) for the current round. Reset on a 200. */
 	int32             TransientRetryCount = 0;
-	static constexpr int32 MaxTransientRetries = 3;
+	static constexpr int32 MaxTransientRetries = 5;
 
 	int32             ToolCallsThisLoop = 0;
+
+	/** Usage of the current round beyond FinalInput/OutputTokens; providers fill them while parsing. */
+	int32             RoundCachedTokens     = 0;
+	int32             RoundCacheWriteTokens = 0;
+	int32             RoundThinkingTokens   = 0;
+
+	/** Call once the round's request body is built. */
+	void BeginRoundTelemetry(const TCHAR* Provider, int32 RequestChars);
+	/** Logs the open round and adds it to the loop totals. Safe to call when no round is open. */
+	void EndRoundTelemetry();
 
 	FCriticalSection  SseMutex;
 	FString           SseBuffer;
@@ -113,6 +123,20 @@ protected:
 	FString           RawResponseBody;
 
 	TSharedPtr<IHttpRequest, ESPMode::ThreadSafe> ActiveRequest;
+
+	FString           TelemetryProvider;
+	bool              bRoundTelemetryOpen = false;
+	int32             RoundRequestChars   = 0;
+	int32             RoundsLogged        = 0;
+	double            RoundStartSeconds   = 0.0;
+	double            RoundEndSeconds     = 0.0;
+	double            LoopModelSeconds    = 0.0;
+	double            LoopToolSeconds     = 0.0;
+	int64             LoopInputTokens     = 0;
+	int64             LoopCachedTokens    = 0;
+	int64             LoopCacheWriteTokens = 0;
+	int64             LoopOutputTokens    = 0;
+	int64             LoopThinkingTokens  = 0;
 
 	void Finish(bool bSuccess, const FString& Error = FString());
 

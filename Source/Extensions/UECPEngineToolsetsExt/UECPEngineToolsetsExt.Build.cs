@@ -1,6 +1,6 @@
 using UnrealBuildTool;
 
-// Axivor AI — bridge to the Unreal Engine 5.8 native Toolset Registry (the same
+// Axivor AI — bridge to the Unreal Engine 5.9 native Toolset Registry (the same
 // tool layer Epic's "Unreal MCP" server exposes), executed in-process, plus the
 // File Sandbox (sandboxed edits with persist/discard).
 public class UECPEngineToolsetsExt : ModuleRules
@@ -21,6 +21,7 @@ public class UECPEngineToolsetsExt : ModuleRules
 		{
 			"UnrealEd", "EditorSubsystem",
 			"ToolsetRegistry",
+			"ToolsetRegistryEditor", // 5.9: SandboxLibrary.h / ToolsetLibrary.h moved here
 			"FileSandboxCore",
 		});
 	}

@@ -833,7 +833,62 @@ void FUECPACPSession::HandleInitializeResult(const TSharedPtr<FJsonObject>& Resu
 		return;
 	}
 
+	// ACP: agentCapabilities.loadSession (session/load) and sessionCapabilities.resume (session/resume).
+	bAgentCanLoad = bAgentCanResume = false;
+	{
+		const TSharedPtr<FJsonObject>* CapsPtr = nullptr;
+		if (Result.IsValid() && Result->TryGetObjectField(TEXT("agentCapabilities"), CapsPtr) && CapsPtr && CapsPtr->IsValid())
+		{
+			(*CapsPtr)->TryGetBoolField(TEXT("loadSession"), bAgentCanLoad);
+			const TSharedPtr<FJsonObject>* SessCaps = nullptr;
+			if ((*CapsPtr)->TryGetObjectField(TEXT("sessionCapabilities"), SessCaps) && SessCaps && SessCaps->IsValid())
+				bAgentCanResume = (*SessCaps)->HasField(TEXT("resume"));
+		}
+	}
+
+	if (!Args.ResumeSessionId.IsEmpty() && (bAgentCanResume || bAgentCanLoad))
+	{
+		UE_LOG(LogUECPACP, Log, TEXT("[%s] reattaching to previous session %s via %s"),
+			*Args.LogTag, *Args.ResumeSessionId, bAgentCanResume ? TEXT("session/resume") : TEXT("session/load"));
+		SendSessionReattach(bAgentCanResume);
+		return;
+	}
+	if (!Args.ResumeSessionId.IsEmpty())
+	{
+		UE_LOG(LogUECPACP, Log, TEXT("[%s] agent cannot resume sessions — starting a new one (history recap will be sent)"), *Args.LogTag);
+	}
+
 	SendSessionNew();
+}
+
+void FUECPACPSession::SendSessionReattach(bool bUseResume)
+{
+	const int64 Id = Codec.NextRequestId();
+	const FString Cwd = Args.Cwd.IsEmpty() ? FPaths::ProjectDir() : Args.Cwd;
+	TSharedRef<FJsonObject> Params = UECPACPSchema::BuildSessionNewParams(Cwd, Args.McpSpecs);
+	Params->SetStringField(TEXT("sessionId"), Args.ResumeSessionId);
+	bReplayingLoad = !bUseResume;
+
+	PendingErrors.Add(Id, [this, bUseResume](const FString& Message, int32 Code)
+	{
+		bReplayingLoad = false;
+		UE_LOG(LogUECPACP, Warning, TEXT("[%s] %s failed (%d: %s)"), *Args.LogTag,
+			bUseResume ? TEXT("session/resume") : TEXT("session/load"), Code, *Message);
+		if (bUseResume && bAgentCanLoad)
+		{
+			SendSessionReattach(false);
+			return;
+		}
+		SendSessionNew();
+	});
+	Pending.Add(Id, [this](const TSharedPtr<FJsonObject>& Result)
+	{
+		bReplayingLoad = false;
+		SessionId = Args.ResumeSessionId;
+		bResumed  = true;
+		FinishSessionReady(Result);
+	});
+	WriteFrame(FUECPACPJsonRpc::FormatRequest(Id, bUseResume ? TEXT("session/resume") : TEXT("session/load"), Params));
 }
 
 void FUECPACPSession::HandleSessionNewResult(const TSharedPtr<FJsonObject>& Result)
@@ -845,8 +900,14 @@ void FUECPACPSession::HandleSessionNewResult(const TSharedPtr<FJsonObject>& Resu
 		return;
 	}
 	SessionId = MoveTemp(NewSessionId);
+	bResumed  = false;
+	FinishSessionReady(Result);
+}
+
+void FUECPACPSession::FinishSessionReady(const TSharedPtr<FJsonObject>& Result)
+{
 	State = EState::Ready;
-	UE_LOG(LogUECPACP, Log, TEXT("[%s] ready — sessionId=%s"), *Args.LogTag, *SessionId);
+	UE_LOG(LogUECPACP, Log, TEXT("[%s] ready — sessionId=%s%s"), *Args.LogTag, *SessionId, bResumed ? TEXT(" (resumed)") : TEXT(""));
 
 	if (Result.IsValid())
 	{
@@ -854,11 +915,11 @@ void FUECPACPSession::HandleSessionNewResult(const TSharedPtr<FJsonObject>& Resu
 		const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Body);
 		FJsonSerializer::Serialize(Result.ToSharedRef(), W);
 		W->Close();
-		UE_LOG(LogUECPACP, Verbose, TEXT("[%s] session/new result: %s"), *Args.LogTag, *Body.Left(4000));
+		UE_LOG(LogUECPACP, Verbose, TEXT("[%s] session result: %s"), *Args.LogTag, *Body.Left(4000));
 	}
 
 	UECPACPSchema::FConfigSnapshot Cfg;
-	UECPACPSchema::ReadSessionNewConfig(Result, Cfg);
+	const bool bHasConfig = UECPACPSchema::ReadSessionNewConfig(Result, Cfg);
 	UE_LOG(LogUECPACP, Log, TEXT("[%s] config captured — models=%d modes=%d"),
 		*Args.LogTag, Cfg.Models.Num(), Cfg.Modes.Num());
 
@@ -867,7 +928,9 @@ void FUECPACPSession::HandleSessionNewResult(const TSharedPtr<FJsonObject>& Resu
 		UE_LOG(LogUECPACP, Verbose, TEXT("[%s]   mode: id=%s name=%s"),
 			*Args.LogTag, *M.Id, *M.Name);
 	}
-	if (OnAgentConfig.IsBound()) OnAgentConfig.Execute(Cfg);
+	// A resumed session may answer without models/modes; keep the cached config instead of wiping it.
+	if (OnAgentConfig.IsBound() && (bHasConfig || !bResumed)) OnAgentConfig.Execute(Cfg);
+	if (OnSessionReady.IsBound() && !Args.bAuthConnection) OnSessionReady.Execute(SessionId, bResumed);
 }
 
 void FUECPACPSession::HandlePromptResult(const TSharedPtr<FJsonObject>& Result)
@@ -928,6 +991,9 @@ void FUECPACPSession::HandleSessionUpdate(const TSharedPtr<FJsonObject>& NotifPa
 	FString Disc;
 	TSharedPtr<FJsonObject> UpdateObj;
 	if (!UECPACPSchema::ReadSessionUpdateDiscriminator(NotifParams, Disc, UpdateObj)) return;
+
+	// session/load replays the whole conversation as updates; the chat already shows it.
+	if (bReplayingLoad) return;
 
 	if (Disc == TEXT("tool_call") || Disc == TEXT("tool_call_update"))
 	{

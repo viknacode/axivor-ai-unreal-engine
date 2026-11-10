@@ -1,6 +1,7 @@
 // Copyright 2026, BlueprintsLab, All rights reserved
 
 #include "Tools/AssetManagementTools.h"
+#include "Animation/AnimBlueprint.h"
 #include "Managers/EditorProfileSync.h"
 #include "Utils/MountResolver.h"
 #include "EditorAssetLibrary.h"
@@ -886,6 +887,18 @@ void HandleCompileBlueprint(const FString& BpPath, FString& OutJsonString, FStri
 	if (!BP)
 	{
 		OutError = FString::Printf(TEXT("Could not load Blueprint at: %s"), *BpPath);
+		return;
+	}
+
+	// A Blueprint whose parent class did not load has no skeleton class; compiling an Anim
+	// Blueprint in that state hits PropertyAccessEditor's check(InContext.Struct) and crashes
+	// the editor (UE 5.9). Refuse with a fixable error.
+	if (!BP->ParentClass || BP->ParentClass->HasAnyClassFlags(CLASS_NewerVersionExists)
+		|| (BP->IsA<UAnimBlueprint>() && (!BP->SkeletonGeneratedClass || !BP->GeneratedClass)))
+	{
+		OutError = FString::Printf(
+			TEXT("Compile skipped for '%s': its parent class is missing or failed to load, so compiling would crash the editor. ")
+			TEXT("Reparent it to an existing class (or migrate the missing parent asset) first."), *BpPath);
 		return;
 	}
 

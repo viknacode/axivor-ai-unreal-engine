@@ -1,6 +1,7 @@
 // Copyright 2026, BlueprintsLab, All rights reserved.
 
 #include "Tools/MaterialGraphTools.h"
+#include "Materials/MaterialExpressionUtils.h"
 #include "Tools/BatchToolHelper.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpression.h"
@@ -1111,7 +1112,7 @@ void HandleSetMaterialNodeValue(
 							if (PropertyName.Equals(TEXT("Texture"), ESearchCase::IgnoreCase))
 							{
 								const EMaterialSamplerType AutoType =
-									UMaterialExpressionTextureBase::GetSamplerTypeForTexture(Tex);
+									MaterialExpressionUtils::GetSamplerTypeForTexture(Tex);
 								if (AutoType != TexBase->SamplerType)
 								{
 									TexBase->SamplerType = AutoType;
@@ -1309,20 +1310,20 @@ void HandleSetMaterialProperty(
 		for (const TSharedPtr<FJsonValue>& FlagVal : *UsageFlagsArr)
 		{
 			const FString Flag = FlagVal->AsString();
-			if      (Flag.Equals(TEXT("SkeletalMesh"),               ESearchCase::IgnoreCase)) { M->bUsedWithSkeletalMesh = true; AppliedUsageFlags.Add(Flag); }
-			else if (Flag.Equals(TEXT("ParticleSprites"),            ESearchCase::IgnoreCase)) { M->bUsedWithParticleSprites = true; AppliedUsageFlags.Add(Flag); }
-			else if (Flag.Equals(TEXT("MeshParticles"),              ESearchCase::IgnoreCase)) { M->bUsedWithMeshParticles = true; AppliedUsageFlags.Add(Flag); }
-			else if (Flag.Equals(TEXT("NiagaraRibbons"),             ESearchCase::IgnoreCase)) { M->bUsedWithNiagaraRibbons = true; AppliedUsageFlags.Add(Flag); }
-			else if (Flag.Equals(TEXT("NiagaraMeshParticles"),       ESearchCase::IgnoreCase)) { M->bUsedWithNiagaraMeshParticles = true; AppliedUsageFlags.Add(Flag); }
+			if      (Flag.Equals(TEXT("SkeletalMesh"),               ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_SkeletalMesh, true); AppliedUsageFlags.Add(Flag); }
+			else if (Flag.Equals(TEXT("ParticleSprites"),            ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_ParticleSprites, true); AppliedUsageFlags.Add(Flag); }
+			else if (Flag.Equals(TEXT("MeshParticles"),              ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_MeshParticles, true); AppliedUsageFlags.Add(Flag); }
+			else if (Flag.Equals(TEXT("NiagaraRibbons"),             ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_NiagaraRibbons, true); AppliedUsageFlags.Add(Flag); }
+			else if (Flag.Equals(TEXT("NiagaraMeshParticles"),       ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_NiagaraMeshParticles, true); AppliedUsageFlags.Add(Flag); }
 			else if (Flag.Equals(TEXT("NiagaraSprites"),             ESearchCase::IgnoreCase)
-			      || Flag.Equals(TEXT("NiagaraSpriteParticles"),     ESearchCase::IgnoreCase)) { M->bUsedWithNiagaraSprites = true; AppliedUsageFlags.Add(Flag); }
-			else if (Flag.Equals(TEXT("InstancedStaticMeshes"),      ESearchCase::IgnoreCase)) { M->bUsedWithInstancedStaticMeshes = true; AppliedUsageFlags.Add(Flag); }
-			else if (Flag.Equals(TEXT("MorphTargets"),               ESearchCase::IgnoreCase)) { M->bUsedWithMorphTargets = true; AppliedUsageFlags.Add(Flag); }
-			else if (Flag.Equals(TEXT("Clothing"),                   ESearchCase::IgnoreCase)) { M->bUsedWithClothing = true; AppliedUsageFlags.Add(Flag); }
-			else if (Flag.Equals(TEXT("HairStrands"),                ESearchCase::IgnoreCase)) { M->bUsedWithHairStrands = true; AppliedUsageFlags.Add(Flag); }
-			else if (Flag.Equals(TEXT("Water"),                      ESearchCase::IgnoreCase)) { M->bUsedWithWater = true; AppliedUsageFlags.Add(Flag); }
-			else if (Flag.Equals(TEXT("Nanite"),                     ESearchCase::IgnoreCase)) { M->bUsedWithNanite = true; AppliedUsageFlags.Add(Flag); }
-			else if (Flag.Equals(TEXT("StaticLighting"),             ESearchCase::IgnoreCase)) { M->bUsedWithStaticLighting = true; AppliedUsageFlags.Add(Flag); }
+			      || Flag.Equals(TEXT("NiagaraSpriteParticles"),     ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_NiagaraSprites, true); AppliedUsageFlags.Add(Flag); }
+			else if (Flag.Equals(TEXT("InstancedStaticMeshes"),      ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_InstancedStaticMeshes, true); AppliedUsageFlags.Add(Flag); }
+			else if (Flag.Equals(TEXT("MorphTargets"),               ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_MorphTargets, true); AppliedUsageFlags.Add(Flag); }
+			else if (Flag.Equals(TEXT("Clothing"),                   ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_Clothing, true); AppliedUsageFlags.Add(Flag); }
+			else if (Flag.Equals(TEXT("HairStrands"),                ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_HairStrands, true); AppliedUsageFlags.Add(Flag); }
+			else if (Flag.Equals(TEXT("Water"),                      ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_Water, true); AppliedUsageFlags.Add(Flag); }
+			else if (Flag.Equals(TEXT("Nanite"),                     ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_Nanite, true); AppliedUsageFlags.Add(Flag); }
+			else if (Flag.Equals(TEXT("StaticLighting"),             ESearchCase::IgnoreCase)) { M->SetUsageByFlag(MATUSAGE_StaticLighting, true); AppliedUsageFlags.Add(Flag); }
 			else                                                                                { UnknownUsageFlags.Add(Flag); }
 		}
 	}
@@ -1564,14 +1565,14 @@ void HandleGetMaterialNodes(
 			}
 
 			TArray<TSharedPtr<FJsonValue>> Flags;
-			if (HeaderM->bUsedWithSkeletalMesh)          Flags.Add(MakeShareable(new FJsonValueString(TEXT("SkeletalMesh"))));
-			if (HeaderM->bUsedWithParticleSprites)        Flags.Add(MakeShareable(new FJsonValueString(TEXT("ParticleSprites"))));
-			if (HeaderM->bUsedWithMeshParticles)          Flags.Add(MakeShareable(new FJsonValueString(TEXT("MeshParticles"))));
-			if (HeaderM->bUsedWithNiagaraRibbons)         Flags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraRibbons"))));
-			if (HeaderM->bUsedWithNiagaraMeshParticles)   Flags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraMeshParticles"))));
-			if (HeaderM->bUsedWithNiagaraSprites)         Flags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraSprites"))));
-			if (HeaderM->bUsedWithInstancedStaticMeshes)  Flags.Add(MakeShareable(new FJsonValueString(TEXT("InstancedStaticMeshes"))));
-			if (HeaderM->bUsedWithMorphTargets)           Flags.Add(MakeShareable(new FJsonValueString(TEXT("MorphTargets"))));
+			if (HeaderM->GetUsageByFlag(MATUSAGE_SkeletalMesh))          Flags.Add(MakeShareable(new FJsonValueString(TEXT("SkeletalMesh"))));
+			if (HeaderM->GetUsageByFlag(MATUSAGE_ParticleSprites))        Flags.Add(MakeShareable(new FJsonValueString(TEXT("ParticleSprites"))));
+			if (HeaderM->GetUsageByFlag(MATUSAGE_MeshParticles))          Flags.Add(MakeShareable(new FJsonValueString(TEXT("MeshParticles"))));
+			if (HeaderM->GetUsageByFlag(MATUSAGE_NiagaraRibbons))         Flags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraRibbons"))));
+			if (HeaderM->GetUsageByFlag(MATUSAGE_NiagaraMeshParticles))   Flags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraMeshParticles"))));
+			if (HeaderM->GetUsageByFlag(MATUSAGE_NiagaraSprites))         Flags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraSprites"))));
+			if (HeaderM->GetUsageByFlag(MATUSAGE_InstancedStaticMeshes))  Flags.Add(MakeShareable(new FJsonValueString(TEXT("InstancedStaticMeshes"))));
+			if (HeaderM->GetUsageByFlag(MATUSAGE_MorphTargets))           Flags.Add(MakeShareable(new FJsonValueString(TEXT("MorphTargets"))));
 			if (Flags.Num() > 0) Info->SetArrayField(TEXT("usage_flags"), Flags);
 
 			Result->SetObjectField(TEXT("material_info"), Info);
@@ -1679,7 +1680,7 @@ void HandleDeleteMaterialNode(const FString& MaterialPath, const FString& NodeHa
 	}
 
 	Target.RemoveAt(NodeIndex);
-	ToDelete->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_ForceNoResetLoaders);
+	ToDelete->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors);
 
 	Target.PostEditChange();
 

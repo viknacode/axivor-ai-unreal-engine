@@ -182,7 +182,9 @@ namespace AnimationTools
 		const FString& SourceChain,
 		const FString& TargetChain,
 		bool bAutoMap,
-		FString& OutJsonString, FString& OutError);
+		FString& OutJsonString, FString& OutError,
+		const FString& MapType = TEXT("exact"),
+		bool bForceRemap = false);
 
 	UECPANIMATIONEXT_API void HandleAddBlendspaceSample(
 		const FString& BlendspacePath,

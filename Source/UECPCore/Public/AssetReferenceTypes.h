@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/ObjectMacros.h"
 
 enum class EAssetRefType : uint8
 {
@@ -86,8 +87,8 @@ struct FApiKeySlot
 	FString SoundGenModel    = TEXT("tts-1");
 	FString SoundGenVoice    = TEXT("alloy");
 
-	FApiKeySlot() : Provider(TEXT("Free")), ApiKey(TEXT("")), SlotIndex(0), GeminiModel(TEXT("gemini-2.5-flash")), OpenAIModel(TEXT("gpt-5-mini-2025-08-07")), ClaudeModel(TEXT("claude-sonnet-4-6")), DeepSeekModel(TEXT("deepseek-v4-flash")), TextureGenEndpoint(TEXT("https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict")), TextureGenModel(TEXT("imagen-4.0-generate-001")), bTextureMode(true) {}
-	FApiKeySlot(int32 InSlotIndex) : Provider(TEXT("Free")), ApiKey(TEXT("")), SlotIndex(InSlotIndex), GeminiModel(TEXT("gemini-2.5-flash")), OpenAIModel(TEXT("gpt-5-mini-2025-08-07")), ClaudeModel(TEXT("claude-sonnet-4-6")), TextureGenEndpoint(TEXT("https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict")), TextureGenModel(TEXT("imagen-4.0-generate-001")), bTextureMode(true) {}
+	FApiKeySlot() : Provider(TEXT("Free")), ApiKey(TEXT("")), SlotIndex(0), GeminiModel(TEXT("gemini-2.5-flash")), OpenAIModel(TEXT("gpt-5-mini-2025-08-07")), ClaudeModel(TEXT("claude-sonnet-5-5")), DeepSeekModel(TEXT("deepseek-v4-flash")), TextureGenEndpoint(TEXT("https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict")), TextureGenModel(TEXT("imagen-4.0-generate-001")), bTextureMode(true) {}
+	FApiKeySlot(int32 InSlotIndex) : Provider(TEXT("Free")), ApiKey(TEXT("")), SlotIndex(InSlotIndex), GeminiModel(TEXT("gemini-2.5-flash")), OpenAIModel(TEXT("gpt-5-mini-2025-08-07")), ClaudeModel(TEXT("claude-sonnet-5-5")), TextureGenEndpoint(TEXT("https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict")), TextureGenModel(TEXT("imagen-4.0-generate-001")), bTextureMode(true) {}
 	bool IsValid() const { return !ApiKey.IsEmpty(); }
 	bool IsCustomProvider() const { return Provider.Equals(TEXT("Custom"), ESearchCase::IgnoreCase); }
 	void Clear()
@@ -99,7 +100,7 @@ struct FApiKeySlot
 		CustomModelName = TEXT("");
 		GeminiModel = TEXT("gemini-2.5-flash");
 		OpenAIModel = TEXT("gpt-5-mini-2025-08-07");
-		ClaudeModel = TEXT("claude-sonnet-4-6");
+		ClaudeModel = TEXT("claude-sonnet-5-5");
 		AgentModel = TEXT("");
 		AgentEffort = TEXT("");
 		CustomParams = TEXT("");

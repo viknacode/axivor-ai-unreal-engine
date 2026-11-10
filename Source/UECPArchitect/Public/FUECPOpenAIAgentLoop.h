@@ -11,6 +11,7 @@ class UECPARCHITECT_API FUECPOpenAIAgentLoop
 public:
 
 	FString ProviderName;
+	FString CustomParams;
 
 	TMap<FString, FString> ExtraHeaders;
 

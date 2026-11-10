@@ -43,6 +43,7 @@ public class UECPShell : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
+			"CascadeRuntime", // UE 5.9: Cascade (UParticleSystem) moved to the Cascade plugin
 			"Projects",
 			"InputCore",
 			"EditorFramework",

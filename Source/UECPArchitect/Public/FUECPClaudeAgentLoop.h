@@ -31,6 +31,7 @@ private:
 		FString ToolName;
 		FString InputAccum;
 		FString TextAccum;
+		TSharedPtr<FJsonObject> RawBlock;
 	};
 	TMap<int32, FContentBlock> CurrentBlocks;
 	FString                    CurrentStopReason;

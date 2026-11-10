@@ -101,6 +101,9 @@ struct FUECPACPAuthStatus
 	// "probe", "login", "logout", or empty when idle.
 	FString BusyOp;
 
+	// "starting" until the agent has answered `initialize`, then "working".
+	FString BusyStage;
+
 	FString Email;
 	FString Plan;
 

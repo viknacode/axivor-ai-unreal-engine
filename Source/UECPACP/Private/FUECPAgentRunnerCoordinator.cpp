@@ -26,6 +26,7 @@
 #include "Services/IUECPVoiceService.h"
 #include "MCPToolsLog.h"
 #include "ACP/FUECPACPSession.h"
+#include "ACP/FUECPACPSchema.h"
 #include "ACP/FUECPACPEventMapper.h"
 #include "UECPACPModule.h"
 #include "Containers/Ticker.h"
@@ -47,6 +48,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -57,90 +59,52 @@
 
 namespace
 {
+	FString AntigravitySettingsDir()
+	{
+		FString GeminiHome = FPlatformMisc::GetEnvironmentVariable(TEXT("GEMINI_HOME"));
+		if (GeminiHome.IsEmpty()) GeminiHome = FPaths::Combine(FPlatformProcess::UserHomeDir(), TEXT(".gemini"));
+		return FPaths::Combine(GeminiHome, TEXT("antigravity-acp"));
+	}
+
+	bool HasAntigravityAccountLogin()
+	{
+		return FPlatformFileManager::Get().GetPlatformFile().FileExists(
+			*FPaths::Combine(AntigravitySettingsDir(), TEXT("acp_token.json")));
+	}
+
 	void EnsureAntigravityConfigured(const FString& AgentId)
 	{
-		if (!AgentId.Contains(TEXT("antigravity"), ESearchCase::IgnoreCase))
-		{
-			return;
-		}
+		if (!AgentId.Contains(TEXT("antigravity"), ESearchCase::IgnoreCase)) return;
 
-		FString GeminiKey = FPlatformMisc::GetEnvironmentVariable(TEXT("GEMINI_API_KEY"));
-		if (GeminiKey.IsEmpty())
+		// A CLI profile uses the agent's account. Never borrow an API key from another
+		// profile or export it into the editor environment: that overrides OAuth and logout.
+		const FString SettingsDir = AntigravitySettingsDir();
+		const FString SettingsFile = FPaths::Combine(SettingsDir, TEXT("settings.json"));
+		FString ExistingContent;
+		TSharedPtr<FJsonObject> Settings;
+		if (FFileHelper::LoadFileToString(ExistingContent, *SettingsFile))
 		{
-			// Check active slot first
-			const FApiKeySlot ActiveSlot = FApiKeyManager::Get().GetActiveSlot();
-			if ((ActiveSlot.Provider.Contains(TEXT("gemini"), ESearchCase::IgnoreCase) ||
-				 ActiveSlot.Provider.Contains(TEXT("antigravity"), ESearchCase::IgnoreCase) ||
-				 ActiveSlot.Provider.Contains(TEXT("google"), ESearchCase::IgnoreCase)) &&
-				!ActiveSlot.ApiKey.IsEmpty())
+			if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(ExistingContent), Settings) || !Settings.IsValid())
 			{
-				GeminiKey = ActiveSlot.ApiKey;
-			}
-
-			// If not found in active slot, scan all slots
-			if (GeminiKey.IsEmpty())
-			{
-				for (const FApiKeySlot& Slot : FApiKeyManager::Get().GetAllSlots())
-				{
-					if ((Slot.Provider.Contains(TEXT("gemini"), ESearchCase::IgnoreCase) ||
-						 Slot.Provider.Contains(TEXT("antigravity"), ESearchCase::IgnoreCase) ||
-						 Slot.Provider.Contains(TEXT("google"), ESearchCase::IgnoreCase)) &&
-						!Slot.ApiKey.IsEmpty())
-					{
-						GeminiKey = Slot.ApiKey;
-						break;
-					}
-				}
-			}
-		}
-
-		if (!GeminiKey.IsEmpty())
-		{
-			FPlatformMisc::SetEnvironmentVar(TEXT("GEMINI_API_KEY"), *GeminiKey);
-		}
-
-		FString UserProfile = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
-		if (UserProfile.IsEmpty())
-		{
-			UserProfile = FPlatformProcess::UserHomeDir();
-		}
-		if (!UserProfile.IsEmpty())
-		{
-			const FString SettingsDir = FPaths::Combine(UserProfile, TEXT(".gemini"), TEXT("antigravity-acp"));
-			const FString SettingsFile = FPaths::Combine(SettingsDir, TEXT("settings.json"));
-
-			IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-			if (!PlatformFile.DirectoryExists(*SettingsDir))
-			{
-				PlatformFile.CreateDirectoryTree(*SettingsDir);
-			}
-
-			// With auth.type set and no stored login, session/new blocks on a browser login it opens by itself.
-			// That would undo a logout on the next spawn, so a missing login stays "needs sign-in" instead.
-			if (GeminiKey.IsEmpty() && !PlatformFile.FileExists(*FPaths::Combine(SettingsDir, TEXT("acp_token.json"))))
-			{
-				FString SeededSettings;
-				TSharedPtr<FJsonObject> SettingsObj;
-				if (FFileHelper::LoadFileToString(SeededSettings, *SettingsFile) && SeededSettings.Contains(TEXT("oauth-personal"))
-					&& FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(SeededSettings), SettingsObj) && SettingsObj.IsValid())
-				{
-					SettingsObj->RemoveField(TEXT("auth"));
-					FString Cleared;
-					const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Cleared);
-					FJsonSerializer::Serialize(SettingsObj.ToSharedRef(), Writer);
-					FFileHelper::SaveStringToFile(Cleared, *SettingsFile);
-				}
+				UE_LOG(LogUECPACP, Warning, TEXT("Cannot read Antigravity settings; leaving the file unchanged."));
 				return;
 			}
+		}
+		else
+		{
+			Settings = MakeShared<FJsonObject>();
+		}
 
-			const FString AuthType = (!GeminiKey.IsEmpty()) ? TEXT("gemini-api-key") : TEXT("oauth-personal");
-			const FString JsonContent = FString::Printf(TEXT("{\n  \"auth\": {\n    \"type\": \"%s\"\n  }\n}\n"), *AuthType);
+		const bool bHasLogin = HasAntigravityAccountLogin();
+		if (!UECPACPSchema::PrepareAntigravityAccountSettings(Settings.ToSharedRef(), bHasLogin)) return;
 
-			FString ExistingContent;
-			if (!FFileHelper::LoadFileToString(ExistingContent, *SettingsFile) || !ExistingContent.Contains(AuthType))
-			{
-				FFileHelper::SaveStringToFile(JsonContent, *SettingsFile);
-			}
+		FString UpdatedContent;
+		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&UpdatedContent);
+		FJsonSerializer::Serialize(Settings.ToSharedRef(), Writer);
+		if (!FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*SettingsDir)
+			|| !FFileHelper::SaveStringToFile(UpdatedContent, *SettingsFile))
+		{
+			UE_LOG(LogUECPACP, Warning, TEXT("Could not update Antigravity account settings."));
 		}
 	}
 
@@ -178,9 +142,29 @@ namespace
 		}
 		if (Name.StartsWith(TEXT("Tool: ")))
 			Name = Name.Mid(6);
+		// "server/tool" style ids only. A shell tool's title is its command line
+		// (robocopy "D:\..." /E /MT:16): cutting at the first '/' turned it into "E /MT:16 ...".
+		const bool bLooksLikeIdentifier = !Name.Contains(TEXT(" ")) && !Name.Contains(TEXT("\\"))
+			&& !Name.Contains(TEXT("\"")) && !Name.Contains(TEXT(":"));
 		int32 SlashIdx = INDEX_NONE;
-		if (Name.FindChar(TEXT('/'), SlashIdx))
+		if (bLooksLikeIdentifier && Name.FindChar(TEXT('/'), SlashIdx))
 			Name = Name.Mid(SlashIdx + 1);
+	}
+
+	// Makes an agent-provided tool title safe to embed in a "[TOOL_RESULT:<label>:<status>]"
+	// header: one line, no ':' or ']' (they delimit the status), and a readable length.
+	FString SanitizeToolHeaderLabel(const FString& InLabel)
+	{
+		FString L = InLabel;
+		L.ReplaceInline(TEXT("\r"), TEXT(" "));
+		L.ReplaceInline(TEXT("\n"), TEXT(" "));
+		L.ReplaceInline(TEXT(":"), TEXT("\x2236")); // RATIO, renders like ':'
+		L.ReplaceInline(TEXT("]"), TEXT(")"));
+		L.ReplaceInline(TEXT("["), TEXT("("));
+		L = L.TrimStartAndEnd();
+		constexpr int32 MaxLen = 140;
+		if (L.Len() > MaxLen) L = L.Left(MaxLen - 1) + TEXT("\x2026");
+		return L.IsEmpty() ? FString(TEXT("tool")) : L;
 	}
 
 	void AppendAgentToolBubble(
@@ -188,7 +172,7 @@ namespace
 		const FString& Label,
 		const FString& InputPreview)
 	{
-		FString Text = FString::Printf(TEXT("[TOOL_RESULT:%s:success]\n%s"), *Label, *InputPreview);
+		FString Text = FString::Printf(TEXT("[TOOL_RESULT:%s:success]\n%s"), *SanitizeToolHeaderLabel(Label), *InputPreview);
 		TSharedPtr<FJsonObject> Msg = MakeShareable(new FJsonObject);
 		Msg->SetStringField(TEXT("role"), TEXT("user"));
 		TArray<TSharedPtr<FJsonValue>> Parts;
@@ -1092,6 +1076,134 @@ static void ForwardACPSlashCommands(UUECPAppBridge* Bridge, const FString& Agent
 	Bridge->PushACPSlashCommands(AgentId, Body);
 }
 
+namespace
+{
+	// Persisted map "<ChatID>|<agent>" -> ACP sessionId, so a chat reattaches to the same agent
+	// session after the editor restarts or crashes (Saved/UECP/acp_sessions.json).
+	FString GetACPSessionStorePath()
+	{
+		return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UECP"), TEXT("acp_sessions.json"));
+	}
+
+	TSharedPtr<FJsonObject> LoadACPSessionStore()
+	{
+		FString Raw;
+		TSharedPtr<FJsonObject> Obj;
+		if (FFileHelper::LoadFileToString(Raw, *GetACPSessionStorePath()))
+		{
+			const TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(Raw);
+			FJsonSerializer::Deserialize(R, Obj);
+		}
+		return Obj.IsValid() ? Obj : MakeShared<FJsonObject>();
+	}
+
+	FString ACPSessionKey(const FString& ChatID, const FString& Agent)
+	{
+		return ChatID + TEXT("|") + Agent;
+	}
+
+	FString LoadACPSessionId(const FString& ChatID, const FString& Agent)
+	{
+		const TSharedPtr<FJsonObject> Store = LoadACPSessionStore();
+		const TSharedPtr<FJsonObject>* Entry = nullptr;
+		FString Id;
+		if (Store->TryGetObjectField(ACPSessionKey(ChatID, Agent), Entry) && Entry && Entry->IsValid())
+			(*Entry)->TryGetStringField(TEXT("session_id"), Id);
+		return Id;
+	}
+
+	void SaveACPSessionId(const FString& ChatID, const FString& Agent, const FString& SessionId)
+	{
+		if (ChatID.IsEmpty() || SessionId.IsEmpty()) return;
+		const TSharedPtr<FJsonObject> Store = LoadACPSessionStore();
+		TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("session_id"), SessionId);
+		Entry->SetStringField(TEXT("agent"), Agent);
+		Entry->SetStringField(TEXT("updated"), FDateTime::UtcNow().ToIso8601());
+		Store->SetObjectField(ACPSessionKey(ChatID, Agent), Entry);
+
+		// Keep the file small: drop the oldest entries beyond 200.
+		if (Store->Values.Num() > 200)
+		{
+			TArray<TPair<FString, FString>> ByDate;
+			for (const auto& KV : Store->Values)
+			{
+				FString When;
+				const TSharedPtr<FJsonObject>* E = nullptr;
+				if (KV.Value.IsValid() && KV.Value->TryGetObject(E) && E) (*E)->TryGetStringField(TEXT("updated"), When);
+				ByDate.Emplace(When, KV.Key);
+			}
+			ByDate.Sort([](const TPair<FString, FString>& A, const TPair<FString, FString>& B) { return A.Key < B.Key; });
+			for (int32 i = 0; i < ByDate.Num() - 200; ++i) Store->RemoveField(ByDate[i].Value);
+		}
+
+		FString Out;
+		const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
+		FJsonSerializer::Serialize(Store.ToSharedRef(), W);
+		W->Close();
+		FFileHelper::SaveStringToFile(Out, *GetACPSessionStorePath(), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	}
+
+	// Recap for a fresh agent session: the MOST RECENT turns (where the work stopped), including
+	// what each tool call did, newest kept when over budget, then emitted in chronological order.
+	FString BuildACPConversationRecap(const TArray<TSharedPtr<FJsonValue>>& H, int32 PriorCount)
+	{
+		constexpr int32 MaxHistoryChars = 12000;
+		TArray<FString> Entries;
+		int32 Used = 0;
+		for (int32 i = PriorCount - 1; i >= 0 && Used < MaxHistoryChars; --i)
+		{
+			const TSharedPtr<FJsonObject> Msg = H[i].IsValid() ? H[i]->AsObject() : nullptr;
+			if (!Msg.IsValid()) continue;
+			FString Role;
+			Msg->TryGetStringField(TEXT("role"), Role);
+			if (Role != TEXT("user") && Role != TEXT("model")) continue;
+			const TArray<TSharedPtr<FJsonValue>>* Parts = nullptr;
+			if (!Msg->TryGetArrayField(TEXT("parts"), Parts) || !Parts || Parts->IsEmpty()) continue;
+			const TSharedPtr<FJsonObject> Part = (*Parts)[0]->AsObject();
+			if (!Part.IsValid()) continue;
+			FString Text;
+			if (!Part->TryGetStringField(TEXT("text"), Text) || Text.IsEmpty()) continue;
+			if (Text == TEXT("*\u2026*") || Text == TEXT("Done.")) continue;
+
+			FString Line;
+			if (Text.StartsWith(TEXT("[TOOL_RESULT:")))
+			{
+				// "[TOOL_RESULT:<name>:<status>]\n<args>\n---\n<result>" -> one compact line.
+				int32 LineEnd = Text.Find(TEXT("\n"));
+				const FString Header = (LineEnd == INDEX_NONE ? Text : Text.Left(LineEnd)).Mid(13).LeftChop(1);
+				int32 Colon = INDEX_NONE;
+				FString Name = Header, Status;
+				if (Header.FindLastChar(TEXT(':'), Colon)) { Name = Header.Left(Colon); Status = Header.Mid(Colon + 1); }
+				FString ResultPart;
+				const int32 Sep = Text.Find(TEXT("\n---\n"));
+				if (Sep != INDEX_NONE) ResultPart = Text.Mid(Sep + 5);
+				ResultPart.ReplaceInline(TEXT("\r"), TEXT(" "));
+				ResultPart.ReplaceInline(TEXT("\n"), TEXT(" "));
+				Line = FString::Printf(TEXT("Tool %s -> %s%s%s\n"), *Name, *Status,
+					ResultPart.IsEmpty() ? TEXT("") : TEXT(": "), *ResultPart.Left(300));
+			}
+			else if (Text.StartsWith(TEXT("[")) && Text.Contains(TEXT("_RESULT:")))
+			{
+				continue; // batch/auto-validate envelopes: covered by their tool lines
+			}
+			else
+			{
+				const FString Label = (Role == TEXT("user")) ? TEXT("User") : TEXT("Assistant");
+				Line = FString::Printf(TEXT("%s: %s\n\n"), *Label, *Text.Left(1500));
+			}
+			Used += Line.Len();
+			Entries.Add(MoveTemp(Line));
+		}
+		if (Entries.IsEmpty()) return FString();
+		FString Turns;
+		for (int32 i = Entries.Num() - 1; i >= 0; --i) Turns += Entries[i];
+		return FString::Printf(
+			TEXT("<prior_conversation note=\"The agent session was restarted (editor restart or crash). This is the latest part of the conversation, oldest first. Continue from where it stopped; do not redo tool calls that already succeeded.\">\n%s</prior_conversation>\n\n"),
+			*Turns);
+	}
+}
+
 void FUECPAgentRunnerCoordinator::SpawnACPInstance(const FString& ChatID, FAgentProviderConfig& Config,
 	const FString& Prompt, EAgentSourceView SourceView)
 {
@@ -1149,35 +1261,15 @@ void FUECPAgentRunnerCoordinator::SpawnACPInstance(const FString& ChatID, FAgent
 			? W->ProjectConversationHistory : W->ArchitectConversationHistory;
 		const int32 PriorCount = H.Num() - 1;
 		if (PriorCount > 0)
-		{
-			FString Turns;
-			constexpr int32 MaxHistoryChars = 8000;
-			for (int32 i = 0; i < PriorCount && Turns.Len() < MaxHistoryChars; ++i)
-			{
-				const TSharedPtr<FJsonObject> Msg = H[i]->AsObject();
-				if (!Msg.IsValid()) continue;
-				FString Role;
-				Msg->TryGetStringField(TEXT("role"), Role);
-				if (Role != TEXT("user") && Role != TEXT("model")) continue;
-				const TArray<TSharedPtr<FJsonValue>>* Parts = nullptr;
-				if (!Msg->TryGetArrayField(TEXT("parts"), Parts) || !Parts || Parts->IsEmpty()) continue;
-				const TSharedPtr<FJsonObject> Part = (*Parts)[0]->AsObject();
-				if (!Part.IsValid()) continue;
-				FString Text;
-				if (!Part->TryGetStringField(TEXT("text"), Text) || Text.IsEmpty()) continue;
-				if (Text.StartsWith(TEXT("[TOOL_")) || Text == TEXT("*\u2026*") || Text == TEXT("Done.")) continue;
-				const FString Label = (Role == TEXT("user")) ? TEXT("User") : TEXT("Assistant");
-				Turns += FString::Printf(TEXT("%s: %s\n\n"), *Label, *Text.Left(1000));
-			}
-			if (!Turns.IsEmpty())
-				HistoryPrefix = FString::Printf(TEXT("<prior_conversation>\n%s</prior_conversation>\n\n"), *Turns);
-		}
+			HistoryPrefix = BuildACPConversationRecap(H, PriorCount);
 	}
 
+	// The recap is inserted at dispatch time, and only if the agent could not resume the session.
 	const FString FullPrompt = SystemPrompt.IsEmpty()
-		? (HistoryPrefix + Prompt)
-		: FString::Printf(TEXT("<system>\n%s\n</system>\n\n%s%s"), *SystemPrompt, *HistoryPrefix, *Prompt);
+		? Prompt
+		: FString::Printf(TEXT("<system>\n%s\n</system>\n\n%s"), *SystemPrompt, *Prompt);
 	Inst->PendingACPPrompt = FullPrompt;
+	Inst->PendingACPHistoryPrefix = HistoryPrefix;
 
 	if (SourceView != EAgentSourceView::ProjectScanner)
 	{
@@ -1290,7 +1382,7 @@ void FUECPAgentRunnerCoordinator::SpawnACPInstance(const FString& ChatID, FAgent
 								if (!Better.IsEmpty())
 								{
 									CurrentText.RemoveFromStart(TEXT("[TOOL_RESULT:MCP: tool"));
-									CurrentText = FString::Printf(TEXT("[TOOL_RESULT:%s%s"), *Better, *CurrentText);
+									CurrentText = FString::Printf(TEXT("[TOOL_RESULT:%s%s"), *SanitizeToolHeaderLabel(Better), *CurrentText);
 									Part->SetStringField(TEXT("text"), CurrentText);
 									I->bHasImportantUpdate = true;
 									if (!W2->bSuppressChatViewRefresh)
@@ -1444,6 +1536,17 @@ void FUECPAgentRunnerCoordinator::SpawnACPInstance(const FString& ChatID, FAgent
 	Args.Cwd        = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 	Args.Cwd.ReplaceInline(TEXT("\\"), TEXT("/"));
 	Args.LogTag     = Config.AgentId.IsEmpty() ? Config.ProviderName : Config.AgentId;
+	// Reattach to this chat's previous agent session (survives editor restarts / crashes).
+	Args.ResumeSessionId = LoadACPSessionId(ChatID, Args.LogTag);
+	{
+		const FString AgentKey = Args.LogTag;
+		Session->OnSessionReady.BindLambda([ChatID, AgentKey](const FString& NewSessionId, bool bResumed)
+		{
+			SaveACPSessionId(ChatID, AgentKey, NewSessionId);
+			UE_LOG(LogUECPACP, Log, TEXT("ACP session %s for chat=%s agent=%s (%s)"),
+				bResumed ? TEXT("resumed") : TEXT("created"), *ChatID, *AgentKey, *NewSessionId);
+		});
+	}
 
 	FString McpFailureReason;
 	FString UecpHttpUrl;
@@ -1926,6 +2029,7 @@ struct FUECPAgentRunnerCoordinator::FAgentAuthOp
 	double ReadyAt  = 0.0;
 	bool   bStarted  = false;
 	bool   bFinished = false;
+	bool   bTimedOut = false;
 
 	bool bGotCaps      = false;
 	bool bLogout       = false;
@@ -1948,6 +2052,15 @@ namespace
 	const TCHAR* const AuthOpProbe  = TEXT("probe");
 	const TCHAR* const AuthOpLogin  = TEXT("login");
 	const TCHAR* const AuthOpLogout = TEXT("logout");
+
+	const TCHAR* const AuthStageStarting = TEXT("starting");
+	const TCHAR* const AuthStageWorking  = TEXT("working");
+
+	// Packaged agents take 15-30 s to answer `initialize`, longer on a loaded machine.
+	constexpr double AuthStartupTimeoutSec  = 120.0;
+	constexpr double AuthLoginTimeoutSec    = 180.0;
+	constexpr double AuthRequestTimeoutSec  = 60.0;
+	constexpr double AuthTerminalTimeoutSec = 300.0;
 
 	bool IsAuthFailureMessage(const FString& Message)
 	{
@@ -2000,6 +2113,7 @@ void FUECPAgentRunnerCoordinator::FailAuthRequest(const FString& AgentId, const 
 {
 	FUECPACPAuthStatus& Status = AuthStatuses.FindOrAdd(AgentId);
 	Status.BusyOp.Empty();
+	Status.BusyStage.Empty();
 	Status.Error = Message;
 	PushAgentAuthStatus(AgentId);
 }
@@ -2011,7 +2125,40 @@ void FUECPAgentRunnerCoordinator::ProbeAgentAuth(const FString& AgentId)
 		PushAgentAuthStatus(AgentId);
 		return;
 	}
+
+	// One probe at a time: opening Settings would otherwise start every installed agent at once.
+	for (const TPair<FString, TSharedPtr<FAgentAuthOp>>& Pair : AuthOps)
+	{
+		if (Pair.Value->Kind == AuthOpProbe)
+		{
+			QueuedProbes.AddUnique(AgentId);
+			FUECPACPAuthStatus& Status = AuthStatuses.FindOrAdd(AgentId);
+			Status.BusyOp    = AuthOpProbe;
+			Status.BusyStage = AuthStageStarting;
+			Status.Error.Empty();
+			PushAgentAuthStatus(AgentId);
+			return;
+		}
+	}
 	StartAuthOp(AgentId, AuthOpProbe, FString());
+}
+
+void FUECPAgentRunnerCoordinator::StartNextQueuedProbe()
+{
+	for (const TPair<FString, TSharedPtr<FAgentAuthOp>>& Pair : AuthOps)
+	{
+		if (Pair.Value->Kind == AuthOpProbe) return;
+	}
+	while (QueuedProbes.Num() > 0)
+	{
+		const FString Next = QueuedProbes[0];
+		QueuedProbes.RemoveAt(0);
+		if (!AuthOps.Contains(Next))
+		{
+			StartAuthOp(Next, AuthOpProbe, FString());
+			return;
+		}
+	}
 }
 
 bool FUECPAgentRunnerCoordinator::StopIdleChatsForAgent(const FString& AgentId)
@@ -2086,13 +2233,18 @@ void FUECPAgentRunnerCoordinator::CancelAgentAuth(const FString& AgentId)
 	}
 	else
 	{
-		AuthStatuses.FindOrAdd(AgentId).BusyOp.Empty();
+		FUECPACPAuthStatus& Status = AuthStatuses.FindOrAdd(AgentId);
+		Status.BusyOp.Empty();
+		Status.BusyStage.Empty();
 		PushAgentAuthStatus(AgentId);
+		StartNextQueuedProbe();
 	}
 }
 
 void FUECPAgentRunnerCoordinator::AbortAuthOp(const FString& AgentId)
 {
+	QueuedProbes.Remove(AgentId);
+
 	TSharedPtr<FAgentAuthOp> Op;
 	if (!AuthOps.RemoveAndCopyValue(AgentId, Op)) return;
 
@@ -2156,11 +2308,12 @@ void FUECPAgentRunnerCoordinator::StartTerminalLogin(const FString& AgentId, con
 	Op->MethodId     = Method.Id;
 	Op->TerminalProc = Proc;
 	Op->bStarted     = true;
-	Op->Deadline     = FPlatformTime::Seconds() + 600.0;
+	Op->Deadline     = FPlatformTime::Seconds() + AuthTerminalTimeoutSec;
 	AuthOps.Add(AgentId, Op);
 
 	FUECPACPAuthStatus& Status = AuthStatuses.FindOrAdd(AgentId);
-	Status.BusyOp = AuthOpLogin;
+	Status.BusyOp    = AuthOpLogin;
+	Status.BusyStage = AuthStageWorking;
 	Status.Error.Empty();
 	Status.LoginUrl.Empty();
 	PushAgentAuthStatus(AgentId);
@@ -2183,8 +2336,9 @@ void FUECPAgentRunnerCoordinator::StartAuthOp(const FString& AgentId, const FStr
 		return;
 	}
 
-	Status.BusyOp = Kind;
-	Status.Error  = CarriedError;
+	Status.BusyOp    = Kind;
+	Status.BusyStage = AuthStageStarting;
+	Status.Error     = CarriedError;
 	if (Kind == AuthOpLogin) Status.LoginUrl.Empty();
 	PushAgentAuthStatus(AgentId);
 
@@ -2194,19 +2348,26 @@ void FUECPAgentRunnerCoordinator::StartAuthOp(const FString& AgentId, const FStr
 	Op->MethodId     = MethodId;
 	Op->AfterOp      = AfterOp;
 	Op->CarriedError = CarriedError;
-	Op->Deadline     = FPlatformTime::Seconds() + (Kind == AuthOpLogin ? 300.0 : 45.0);
+	Op->Deadline     = FPlatformTime::Seconds() + AuthStartupTimeoutSec;
 	Op->Session      = MakeShared<FUECPACPSession>();
 	AuthOps.Add(AgentId, Op);
 
 	// The op owns the session and is only destroyed outside its Tick, so a raw pointer is safe in these delegates.
 	FAgentAuthOp* Raw = Op.Get();
 	Op->Session->OnAuthCapabilities.BindLambda(
-		[Raw](const TArray<FUECPACPAuthMethod>& Methods, bool bLogout, bool bPushesStatus)
+		[this, Raw](const TArray<FUECPACPAuthMethod>& Methods, bool bLogout, bool bPushesStatus)
 		{
 			Raw->Methods       = Methods;
 			Raw->bLogout       = bLogout;
 			Raw->bPushesStatus = bPushesStatus;
 			Raw->bGotCaps      = true;
+			Raw->Deadline      = FPlatformTime::Seconds()
+				+ (Raw->Kind == AuthOpLogin ? AuthLoginTimeoutSec : AuthRequestTimeoutSec);
+
+			UE_LOG(LogUECPACP, Log, TEXT("Agent auth op '%s' for '%s': agent started, sending the request"),
+				*Raw->Kind, *Raw->AgentId);
+			AuthStatuses.FindOrAdd(Raw->AgentId).BusyStage = AuthStageWorking;
+			PushAgentAuthStatus(Raw->AgentId);
 
 			TFunction<void(const FString&)> Done = [Raw](const FString& Error)
 			{
@@ -2273,12 +2434,17 @@ void FUECPAgentRunnerCoordinator::StartAuthOp(const FString& AgentId, const FStr
 	FPlatformMisc::SetEnvironmentVar(TEXT("NO_COLOR"), TEXT("1"));
 	EnsureAntigravityConfigured(AgentId);
 
+	UE_LOG(LogUECPACP, Log, TEXT("Agent auth op '%s' started for '%s'"), *Kind, *AgentId);
+
+	// The ticker runs from here on, so the deadline holds even while the spawn is still in progress.
+	AddAuthOpTicker(Op);
+
 	TSharedPtr<FUECPACPSession> Session = Op->Session;
 	TWeakPtr<FAgentAuthOp> WeakOp = Op;
-	Async(EAsyncExecution::Thread, [this, Session, Args, WeakOp]()
+	Async(EAsyncExecution::Thread, [Session, Args, WeakOp]()
 	{
 		const bool bSpawned = Session->Start(Args);
-		AsyncTask(ENamedThreads::GameThread, [this, Session, WeakOp, bSpawned]()
+		AsyncTask(ENamedThreads::GameThread, [Session, WeakOp, bSpawned]()
 		{
 			const TSharedPtr<FAgentAuthOp> Pinned = WeakOp.Pin();
 			if (!Pinned.IsValid())
@@ -2287,13 +2453,11 @@ void FUECPAgentRunnerCoordinator::StartAuthOp(const FString& AgentId, const FStr
 				return;
 			}
 			Pinned->bStarted = true;
-			if (bSpawned)
+			if (!bSpawned)
 			{
-				AddAuthOpTicker(Pinned);
-				return;
+				Pinned->Error     = TEXT("Não foi possível iniciar o agente.");
+				Pinned->bFinished = true;
 			}
-			Pinned->Error = TEXT("Não foi possível iniciar o agente.");
-			FinishAuthOp(Pinned);
 		});
 	});
 }
@@ -2308,7 +2472,8 @@ bool FUECPAgentRunnerCoordinator::TickAuthOp(const TSharedPtr<FAgentAuthOp>& Op)
 		{
 			if (Now <= Op->Deadline) return true;
 			FPlatformProcess::TerminateProc(Op->TerminalProc, true);
-			Op->Error = TEXT("O login expirou.");
+			Op->bTimedOut = true;
+			Op->Error = TEXT("O login não foi concluído a tempo.");
 		}
 		else
 		{
@@ -2322,7 +2487,8 @@ bool FUECPAgentRunnerCoordinator::TickAuthOp(const TSharedPtr<FAgentAuthOp>& Op)
 		return false;
 	}
 
-	const bool bAlive = Op->Session->Tick();
+	// Session::Start runs on another thread until bStarted is set; it must not be ticked before that.
+	const bool bAlive = !Op->bStarted || Op->bFinished || Op->Session->Tick();
 
 	// An agent that pushes its identity gets a moment after session/new to do so.
 	if (Op->ReadyAt > 0.0 && !Op->bFinished
@@ -2338,9 +2504,12 @@ bool FUECPAgentRunnerCoordinator::TickAuthOp(const TSharedPtr<FAgentAuthOp>& Op)
 	if (!Op->bFinished && Now > Op->Deadline)
 	{
 		Op->bFinished = true;
-		Op->Error = Op->Kind == AuthOpLogin
-			? TEXT("O login não foi concluído a tempo.")
-			: TEXT("O agente não respondeu a tempo.");
+		Op->bTimedOut = true;
+		Op->Error = !Op->bGotCaps
+			? TEXT("O agente não iniciou a tempo. O computador pode estar com pouca memória; feche outros programas e tente de novo.")
+			: Op->Kind == AuthOpLogin
+				? TEXT("O login não foi concluído a tempo.")
+				: TEXT("O agente não respondeu a tempo.");
 	}
 	if (!Op->bFinished) return true;
 
@@ -2352,19 +2521,28 @@ void FUECPAgentRunnerCoordinator::FinishAuthOp(const TSharedPtr<FAgentAuthOp>& O
 {
 	const FString AgentId = Op->AgentId;
 	AuthOps.Remove(AgentId);
-	if (Op->Session.IsValid()) Op->Session->Stop();
+	// A session still inside Start() is stopped by its own continuation once the op is gone.
+	if (Op->Session.IsValid() && Op->bStarted) Op->Session->Stop();
 
 	UE_LOG(LogUECPACP, Log, TEXT("Agent auth op '%s' finished for '%s'%s"),
-		*Op->Kind, *AgentId, Op->Error.IsEmpty() ? TEXT("") : TEXT(" with an error"));
+		*Op->Kind, *AgentId, Op->bTimedOut ? TEXT(" (timed out)") : Op->Error.IsEmpty() ? TEXT("") : TEXT(" with an error"));
 
 	if (Op->Kind != AuthOpProbe)
 	{
+		if (Op->bTimedOut)
+		{
+			// The agent never answered, so probing it again would only keep the card busy for nothing.
+			FailAuthRequest(AgentId, Op->Error);
+			StartNextQueuedProbe();
+			return;
+		}
 		StartAuthOp(AgentId, AuthOpProbe, FString(), Op->Kind, Op->Error);
 		return;
 	}
 
 	FUECPACPAuthStatus& Status = AuthStatuses.FindOrAdd(AgentId);
 	Status.BusyOp.Empty();
+	Status.BusyStage.Empty();
 	Status.LastProbeAt = FPlatformTime::Seconds();
 	Status.Error = Op->CarriedError;
 	Status.Email.Empty();
@@ -2384,11 +2562,7 @@ void FUECPAgentRunnerCoordinator::FinishAuthOp(const TSharedPtr<FAgentAuthOp>& O
 		Status.State = EUECPACPAuthState::Connected;
 		Status.Email = Op->Email;
 		Status.Plan  = Op->Label.IsEmpty() ? Op->TierName : Op->Label;
-		if (Status.Plan.IsEmpty() && AgentId.Contains(TEXT("antigravity"), ESearchCase::IgnoreCase)
-			&& !FPlatformMisc::GetEnvironmentVariable(TEXT("GEMINI_API_KEY")).IsEmpty())
-		{
-			Status.Plan = TEXT("Chave de API do Gemini");
-		}
+
 	}
 	else if (!Op->SessionError.IsEmpty() && Op->SessionErrorCode == -32000 && IsAuthFailureMessage(Op->SessionError))
 	{
@@ -2411,6 +2585,7 @@ void FUECPAgentRunnerCoordinator::FinishAuthOp(const TSharedPtr<FAgentAuthOp>& O
 
 	const EUECPACPAuthState State = Status.State;
 	PushAgentAuthStatus(AgentId);
+	StartNextQueuedProbe();
 
 	auto W = Shell.Pin();
 	if (!W.IsValid()) return;
@@ -2542,8 +2717,22 @@ bool FUECPAgentRunnerCoordinator::OnACPInstanceTick(TSharedPtr<FAgentRunnerInsta
 
 		if (!Inst->PendingACPPrompt.IsEmpty())
 		{
-			const FString ToSend = Inst->PendingACPPrompt;
+			FString ToSend = Inst->PendingACPPrompt;
 			Inst->PendingACPPrompt.Reset();
+
+			if (!Inst->PendingACPHistoryPrefix.IsEmpty())
+			{
+				const FString Prefix = Inst->ACPSession->WasResumed()
+					? FString(TEXT("[The Unreal Editor restarted and this agent session was resumed with its full context. Continue from where you left off.]\n\n"))
+					: Inst->PendingACPHistoryPrefix;
+				Inst->PendingACPHistoryPrefix.Reset();
+				const FString SysClose = TEXT("</system>\n\n");
+				const int32 SysEnd = ToSend.StartsWith(TEXT("<system>")) ? ToSend.Find(SysClose) : INDEX_NONE;
+				if (SysEnd != INDEX_NONE)
+					ToSend = ToSend.Left(SysEnd + SysClose.Len()) + Prefix + ToSend.Mid(SysEnd + SysClose.Len());
+				else
+					ToSend = Prefix + ToSend;
+			}
 
 			if (Inst->PendingACPImages.Num() > 0)
 			{

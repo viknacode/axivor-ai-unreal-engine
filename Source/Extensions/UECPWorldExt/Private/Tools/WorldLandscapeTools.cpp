@@ -84,7 +84,7 @@ namespace WorldExt
 	static bool PickEditLayer(ALandscape* L, const FString& Requested, FGuid& OutGuid, FString& OutName, FString& OutErr)
 	{
 		OutGuid = FGuid();
-		if (!L->HasLayersContent()) { OutName = TEXT("(landscape has no edit layers)"); return true; }
+		// UE 5.8+: every landscape uses edit layers (HasLayersContent is deprecated and always true).
 		auto Use = [&OutGuid, &OutName](const ULandscapeEditLayerBase* EL)
 		{
 			OutGuid = EL->GetGuid();

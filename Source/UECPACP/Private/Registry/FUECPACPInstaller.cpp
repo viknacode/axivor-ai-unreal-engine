@@ -16,6 +16,7 @@
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
+#include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
@@ -578,12 +579,20 @@ namespace FUECPACPInstaller
 			});
 		}
 
+		const FString CmdAbs = ResolveCmdAbsPath(CacheDir, Bin->Cmd);
+
+		// tar exits non-zero on symlinks it can't create on Windows (Cortex's reladiff-venv/lib64)
+		// but still extracts the rest, so the entrypoint decides whether the install succeeded.
 		if (!ExtractArchive(ArchivePath, CacheDir, OutError))
 		{
-			return false;
+			if (!IFileManager::Get().FileExists(*CmdAbs))
+			{
+				return false;
+			}
+			UE_LOG(LogUECPACP, Warning, TEXT("Partial extraction for '%s', entrypoint present: %s"), *Entry.Id, *OutError);
+			OutError.Reset();
 		}
 
-		const FString CmdAbs = ResolveCmdAbsPath(CacheDir, Bin->Cmd);
 		if (!IFileManager::Get().FileExists(*CmdAbs))
 		{
 			OutError = FString::Printf(
@@ -607,6 +616,68 @@ namespace FUECPACPInstaller
 		return true;
 	}
 
+	// Copies fetched by Scripts/Fetch-ACPAgents.ps1 live in ThirdParty/ACPAgents/<id>/bundle.json.
+	static bool ResolveBundledAgent(const FString& AgentId, FUECPACPInstallMarker& OutMarker)
+	{
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("BpGeneratorUltimate"));
+		if (!Plugin.IsValid()) return false;
+
+		const FString BundleDir = FPaths::ConvertRelativePathToFull(Plugin->GetBaseDir() / TEXT("ThirdParty/ACPAgents") / AgentId);
+
+		FString Json;
+		if (!FFileHelper::LoadFileToString(Json, *(BundleDir / TEXT("bundle.json")))) return false;
+
+		TSharedPtr<FJsonObject> Obj;
+		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Obj) || !Obj.IsValid()) return false;
+
+		FString Version, Runner, EntrypointRel;
+		Obj->TryGetStringField(TEXT("version"), Version);
+		Obj->TryGetStringField(TEXT("runner"), Runner);
+		Obj->TryGetStringField(TEXT("entrypoint"), EntrypointRel);
+
+		const FString EntrypointAbs = BundleDir / EntrypointRel;
+		if (EntrypointRel.IsEmpty() || !IFileManager::Get().FileExists(*EntrypointAbs))
+		{
+			UE_LOG(LogUECPACP, Warning, TEXT("Bundled agent '%s' has no entrypoint at %s"), *AgentId, *EntrypointAbs);
+			return false;
+		}
+
+		TArray<FString> Args;
+		const TArray<TSharedPtr<FJsonValue>>* ArgsArr = nullptr;
+		if (Obj->TryGetArrayField(TEXT("args"), ArgsArr) && ArgsArr)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *ArgsArr)
+			{
+				if (V.IsValid()) Args.Add(V->AsString());
+			}
+		}
+
+		OutMarker.AgentId = AgentId;
+		OutMarker.Version = Version;
+		OutMarker.InstalledAtUtc = AsIsoUtc();
+
+		if (Runner == TEXT("node"))
+		{
+			const FString NodeExe = FindNodeExe(FindNpxPath());
+			if (NodeExe.IsEmpty())
+			{
+				UE_LOG(LogUECPACP, Warning, TEXT("Bundled agent '%s' needs Node.js, which was not found"), *AgentId);
+				return false;
+			}
+			OutMarker.Method            = EUECPACPDistributionKind::Npx;
+			OutMarker.EntrypointCommand = NodeExe;
+			OutMarker.EntrypointArgs    = { EntrypointAbs };
+			OutMarker.EntrypointArgs.Append(Args);
+		}
+		else
+		{
+			OutMarker.Method            = EUECPACPDistributionKind::Binary;
+			OutMarker.EntrypointCommand = EntrypointAbs;
+			OutMarker.EntrypointArgs    = Args;
+		}
+		return true;
+	}
+
 	void Install(const FUECPACPAgentEntry& Entry,
 		FUECPACPInstallProgress OnProgress,
 		FUECPACPInstallComplete OnComplete)
@@ -617,6 +688,20 @@ namespace FUECPACPInstaller
 			AsyncTask(ENamedThreads::GameThread, [OnComplete]()
 			{
 				if (OnComplete.IsBound()) OnComplete.Execute(false, FUECPACPInstallMarker{});
+			});
+			return;
+		}
+
+		// A marker means this is an update request, which has to reach the network.
+		FUECPACPInstallMarker BundledMarker;
+		if (!FPaths::FileExists(MarkerPath(Entry.Id)) && ResolveBundledAgent(Entry.Id, BundledMarker))
+		{
+			const bool bWrote = WriteMarker(BundledMarker);
+			UE_LOG(LogUECPACP, Log, TEXT("Install '%s': using bundled v%s → %s"),
+				*Entry.Id, *BundledMarker.Version, *BundledMarker.EntrypointCommand);
+			AsyncTask(ENamedThreads::GameThread, [OnComplete, BundledMarker, bWrote]()
+			{
+				if (OnComplete.IsBound()) OnComplete.Execute(bWrote, BundledMarker);
 			});
 			return;
 		}

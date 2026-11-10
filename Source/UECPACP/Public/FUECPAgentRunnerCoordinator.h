@@ -44,6 +44,9 @@ private:
 	struct FAgentAuthOp;
 	TMap<FString, TSharedPtr<FAgentAuthOp>> AuthOps;
 	TMap<FString, FUECPACPAuthStatus>       AuthStatuses;
+	TArray<FString>                         QueuedProbes;
+
+	void StartNextQueuedProbe();
 
 	void StartAuthOp(const FString& AgentId, const FString& Kind, const FString& MethodId,
 		const FString& AfterOp = FString(), const FString& CarriedError = FString());

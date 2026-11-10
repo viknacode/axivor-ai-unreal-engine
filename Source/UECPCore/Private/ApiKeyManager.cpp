@@ -4,6 +4,7 @@
 #include "Managers/ProviderConfigManager.h"
 #include "Managers/SettingsManager.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Misc/Base64.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "Serialization/JsonSerializer.h"
@@ -100,7 +101,7 @@ void FApiKeyManager::LoadFromConfig()
 				Slots[i].ClaudeModel = SlotObj->GetStringField(TEXT("ClaudeModel"));
 				if (Slots[i].ClaudeModel.IsEmpty())
 				{
-					Slots[i].ClaudeModel = TEXT("claude-sonnet-4-6");
+					Slots[i].ClaudeModel = TEXT("claude-sonnet-5-5");
 				}
 				Slots[i].DeepSeekModel = SlotObj->GetStringField(TEXT("DeepSeekModel"));
 				if (Slots[i].DeepSeekModel.IsEmpty())
@@ -345,7 +346,7 @@ FString FApiKeyManager::GetActiveModelName() const
 	if (!DynamicDefault.IsEmpty()) return DynamicDefault;
 	static const TMap<FString, FString> ProviderModels = {
 		{TEXT("OpenAI"),   TEXT("gpt-5-mini-2025-08-07")},
-		{TEXT("Claude"),   TEXT("claude-sonnet-4-6")},
+		{TEXT("Claude"),   TEXT("claude-sonnet-5-5")},
 		{TEXT("Gemini"),   TEXT("gemini-2.5-flash")},
 		{TEXT("DeepSeek"), TEXT("deepseek-v4-flash")}
 	};
@@ -380,7 +381,7 @@ FString FApiKeyManager::GetActiveClaudeModel() const
 	{
 		return Slot.ClaudeModel;
 	}
-	return TEXT("claude-sonnet-4-6");
+	return TEXT("claude-sonnet-5-5");
 }
 FApiKeyManager::FImageGenConfig FApiKeyManager::GetImageGenConfig() const
 {

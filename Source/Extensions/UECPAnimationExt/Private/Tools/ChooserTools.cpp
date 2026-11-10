@@ -20,11 +20,23 @@
 #include "StructUtils/InstancedStruct.h"
 #endif
 #include "Modules/ModuleManager.h"
+#include "Chooser.h"
+#include "IChooserColumn.h"
 
 namespace ChooserTools
 {
 
 static FString GChooserStructCandidates;
+
+// The array a column really filters on: not always "RowValues" (FBoolColumn reads RowValuesWithAny and
+// its reflected RowValues is the deprecated array, which the engine never evaluates).
+static FArrayProperty* GetColumnRowValuesProp(FInstancedStruct& ColStruct)
+{
+	FChooserColumnBase* Column = ColStruct.GetMutablePtr<FChooserColumnBase>();
+	if (!Column) return nullptr;
+	const FName PropName = Column->RowValuesPropertyName();
+	return FindFProperty<FArrayProperty>(ColStruct.GetScriptStruct(), PropName.IsNone() ? FName(TEXT("RowValues")) : PropName);
+}
 
 static UScriptStruct* FindChooserStruct(const FString& StructName)
 {
@@ -34,7 +46,7 @@ static UScriptStruct* FindChooserStruct(const FString& StructName)
 	if (!bModulesLoaded)
 	{
 		bModulesLoaded = true;
-		for (const TCHAR* Mod : { TEXT("Chooser"), TEXT("ChooserEditor") })
+		for (const TCHAR* Mod : { TEXT("Chooser"), TEXT("ChooserEditor"), TEXT("PoseSearch") })
 		{
 			if (!FModuleManager::Get().IsModuleLoaded(Mod))
 				FModuleManager::Get().LoadModule(Mod);
@@ -125,6 +137,7 @@ static void SaveChooserTable(UObject* Table, const FString& ChooserPath)
 	if (!Table) return;
 	Table->PostEditChange();
 	if (GChooserSaveSuppressDepth > 0) return;
+	if (UChooserTable* Chooser = Cast<UChooserTable>(Table)) Chooser->Compile(true);
 	const UPackage* Pkg = Table->GetPackage();
 	const FString PathToSave = Pkg ? Pkg->GetName() : ChooserPath;
 	UEditorAssetLibrary::SaveAsset(PathToSave, false);
@@ -215,6 +228,12 @@ void HandleAddChooserColumn(const FString& ChooserPath, const FString& ColumnTyp
 	else if (TypeLower == TEXT("object"))         StructName = TEXT("ObjectColumn");
 	else if (TypeLower == TEXT("object_class"))   StructName = TEXT("ObjectClassColumn");
 	else if (TypeLower == TEXT("randomize"))      StructName = TEXT("RandomizeColumn");
+	else if (TypeLower == TEXT("name"))           StructName = TEXT("ChooserNameColumn");
+	else if (TypeLower == TEXT("gameplay_tag_query"))        StructName = TEXT("GameplayTagQueryColumn");
+	else if (TypeLower == TEXT("output_name"))               StructName = TEXT("ChooserOutputNameColumn");
+	else if (TypeLower == TEXT("output_gameplay_tag"))       StructName = TEXT("OutputGameplayTagColumn");
+	else if (TypeLower == TEXT("output_gameplay_tag_query")) StructName = TEXT("OutputGameplayTagQueryColumn");
+	else if (TypeLower == TEXT("pose_match"))     StructName = TEXT("PoseSearchColumn");
 	else
 	{
 		if (ColumnType.Contains(TEXT(".")))
@@ -227,7 +246,7 @@ void HandleAddChooserColumn(const FString& ChooserPath, const FString& ColumnTyp
 	if (!ColStruct)
 	{
 		OutError = FString::Printf(
-			TEXT("Column struct '%s' (%s) not found. Valid types: float_range, float_distance, output_object, output_bool, output_float, output_enum, output_struct, bool, enum, multi_enum, gameplay_tag, object, object_class, randomize. In-memory Chooser structs: %s"),
+			TEXT("Column struct '%s' (%s) not found. Valid types: float_range, float_distance, output_object, output_bool, output_float, output_enum, output_struct, output_name, output_gameplay_tag, output_gameplay_tag_query, bool, enum, multi_enum, name, gameplay_tag, gameplay_tag_query, object, object_class, randomize, pose_match. In-memory Chooser structs: %s"),
 			*ColumnType, *StructName, *GChooserStructCandidates);
 		return;
 	}
@@ -246,13 +265,29 @@ void HandleAddChooserColumn(const FString& ChooserPath, const FString& ColumnTyp
 	FInstancedStruct* InstStruct = static_cast<FInstancedStruct*>(ElemPtr);
 	InstStruct->InitializeAs(ColStruct, nullptr);
 
+	// A filter column shorter than the results array drops the missing rows at runtime.
+	int32 NumRows = 0;
+	if (FArrayProperty* ResultsProp = GetResultsStructsProp())
+	{
+		FScriptArrayHelper ResultsHelper(ResultsProp, ResultsProp->ContainerPtrToValuePtr<void>(Table));
+		NumRows = ResultsHelper.Num();
+	}
+	if (FChooserColumnBase* Column = InstStruct->GetMutablePtr<FChooserColumnBase>())
+	{
+		Column->Initialize(Cast<UChooserTable>(Table));
+		Column->SetNumRows(NumRows);
+	}
+
 	Table->Modify();
 	Table->MarkPackageDirty();
 	SaveChooserTable(Table, ChooserPath);
 
+	const FString Note = ColStruct->GetName() == TEXT("PoseSearchColumn")
+		? TEXT(",\"note\":\"Pose Match is experimental: keep it as the last column; results must be animation assets with a PoseSearchBranchIn notify state.\"")
+		: FString();
 	OutJson = FString::Printf(
-		TEXT("{\"success\":true,\"column_type\":\"%s\",\"column_index\":%d,\"chooser_path\":\"%s\"}"),
-		*ColumnType, NewIdx, *ChooserPath);
+		TEXT("{\"success\":true,\"column_type\":\"%s\",\"column_index\":%d,\"num_rows\":%d,\"chooser_path\":\"%s\"%s}"),
+		*ColumnType, NewIdx, NumRows, *ChooserPath, *Note);
 }
 
 void HandleAddChooserRow(const FString& ChooserPath, const FString& AssetPath,
@@ -273,30 +308,39 @@ void HandleAddChooserRow(const FString& ChooserPath, const FString& AssetPath,
 		return;
 	}
 
+	// Validate before touching the table: a row with no result would still report success and output nothing.
+	UObject* Asset = nullptr;
+	UScriptStruct* AssetChooserStruct = nullptr;
+	FObjectProperty* AssetProp = nullptr;
+	if (!AssetPath.IsEmpty())
+	{
+		Asset = LoadObject<UObject>(nullptr, *AssetPath);
+		if (!Asset)
+		{
+			OutError = FString::Printf(TEXT("Could not load asset for the chooser row: '%s'"), *AssetPath);
+			return;
+		}
+		AssetChooserStruct = FindChooserStruct(TEXT("AssetChooser"));
+		AssetProp = AssetChooserStruct ? FindFProperty<FObjectProperty>(AssetChooserStruct, TEXT("Asset")) : nullptr;
+		if (!AssetProp)
+		{
+			OutError = TEXT("Could not reflect AssetChooser.Asset on this engine version");
+			return;
+		}
+	}
+
 	FScriptArrayHelper ResultsHelper(ResultsProp,
 		ResultsProp->ContainerPtrToValuePtr<void>(Table));
 	const int32 NewRowIdx = ResultsHelper.AddValue();
 
-	if (!AssetPath.IsEmpty())
+	if (Asset)
 	{
-		UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
-		if (Asset)
-		{
-			UScriptStruct* AssetChooserStruct = FindChooserStruct(TEXT("AssetChooser"));
-			if (AssetChooserStruct)
-			{
-				void* ElemPtr = ResultsHelper.GetRawPtr(NewRowIdx);
-				FInstancedStruct* ResultStruct = static_cast<FInstancedStruct*>(ElemPtr);
-				ResultStruct->InitializeAs(AssetChooserStruct, nullptr);
-				void* StructMem = ResultStruct->GetMutableMemory();
-				if (FObjectProperty* AssetProp =
-					FindFProperty<FObjectProperty>(AssetChooserStruct, TEXT("Asset")))
-				{
-					AssetProp->SetObjectPropertyValue(
-						AssetProp->ContainerPtrToValuePtr<void>(StructMem), Asset);
-				}
-			}
-		}
+		void* ElemPtr = ResultsHelper.GetRawPtr(NewRowIdx);
+		FInstancedStruct* ResultStruct = static_cast<FInstancedStruct*>(ElemPtr);
+		ResultStruct->InitializeAs(AssetChooserStruct, nullptr);
+		void* StructMem = ResultStruct->GetMutableMemory();
+		AssetProp->SetObjectPropertyValue(
+			AssetProp->ContainerPtrToValuePtr<void>(StructMem), Asset);
 	}
 
 	FArrayProperty* ColsProp = GetColumnsStructsProp();
@@ -309,16 +353,9 @@ void HandleAddChooserRow(const FString& ChooserPath, const FString& AssetPath,
 			FInstancedStruct* ColStruct = static_cast<FInstancedStruct*>(ColElem);
 			if (!ColStruct || !ColStruct->IsValid()) continue;
 
-			UScriptStruct* ColType = const_cast<UScriptStruct*>(ColStruct->GetScriptStruct());
-			FArrayProperty* RowValuesProp =
-				FindFProperty<FArrayProperty>(ColType, TEXT("RowValues"));
-			if (RowValuesProp)
-			{
-				void* ColMem = ColStruct->GetMutableMemory();
-				FScriptArrayHelper RVHelper(RowValuesProp,
-					RowValuesProp->ContainerPtrToValuePtr<void>(ColMem));
-				RVHelper.AddValue();
-			}
+			// The column fills new cells with its own default (MatchAny on bool columns).
+			if (FChooserColumnBase* Column = ColStruct->GetMutablePtr<FChooserColumnBase>())
+				Column->SetNumRows(ResultsHelper.Num());
 		}
 	}
 
@@ -366,27 +403,37 @@ void HandleGetChooserSummary(const FString& ChooserPath, FString& OutJson, FStri
 	}
 
 	FString ColTypes = TEXT("[");
+	FString ColRowCounts = TEXT("[");
 	if (FArrayProperty* ColsProp = GetColumnsStructsProp())
 	{
 		FScriptArrayHelper ColsHelper(ColsProp, ColsProp->ContainerPtrToValuePtr<void>(Table));
 		for (int32 i = 0; i < ColsHelper.Num(); ++i)
 		{
 			void* ElemPtr = ColsHelper.GetRawPtr(i);
-			const FInstancedStruct* ColStruct = static_cast<const FInstancedStruct*>(ElemPtr);
+			FInstancedStruct* ColStruct = static_cast<FInstancedStruct*>(ElemPtr);
 			if (ColStruct && ColStruct->IsValid())
 			{
-				if (i > 0) ColTypes += TEXT(",");
+				if (i > 0) { ColTypes += TEXT(","); ColRowCounts += TEXT(","); }
 				ColTypes += TEXT("\"");
 				ColTypes += ColStruct->GetScriptStruct()->GetName();
 				ColTypes += TEXT("\"");
+
+				int32 ColRows = -1;
+				if (FArrayProperty* RVProp = GetColumnRowValuesProp(*ColStruct))
+				{
+					FScriptArrayHelper RVHelper(RVProp, RVProp->ContainerPtrToValuePtr<void>(ColStruct->GetMutableMemory()));
+					ColRows = RVHelper.Num();
+				}
+				ColRowCounts += FString::FromInt(ColRows);
 			}
 		}
 	}
 	ColTypes += TEXT("]");
+	ColRowCounts += TEXT("]");
 
 	OutJson = FString::Printf(
-		TEXT("{\"success\":true,\"column_count\":%d,\"row_count\":%d,\"output_type\":\"%s\",\"columns\":%s}"),
-		ColCount, RowCount, *OutputTypeName, *ColTypes);
+		TEXT("{\"success\":true,\"column_count\":%d,\"row_count\":%d,\"output_type\":\"%s\",\"columns\":%s,\"column_row_counts\":%s}"),
+		ColCount, RowCount, *OutputTypeName, *ColTypes, *ColRowCounts);
 }
 
 void HandleSetChooserRowValue(const FString& ChooserPath, int32 ColumnIndex, int32 RowIndex,
@@ -419,7 +466,7 @@ void HandleSetChooserRowValue(const FString& ChooserPath, int32 ColumnIndex, int
 	}
 
 	UScriptStruct* ColType = const_cast<UScriptStruct*>(ColStruct->GetScriptStruct());
-	FArrayProperty* RowValuesProp = FindFProperty<FArrayProperty>(ColType, TEXT("RowValues"));
+	FArrayProperty* RowValuesProp = GetColumnRowValuesProp(*ColStruct);
 	if (!RowValuesProp)
 	{
 		OutError = FString::Printf(TEXT("Column type '%s' has no RowValues array"), *ColType->GetName());
@@ -490,7 +537,15 @@ void HandleSetChooserRowValue(const FString& ChooserPath, int32 ColumnIndex, int
 	}
 	else
 	{
-		const TCHAR* ImportResult = Prop->ImportText_Direct(*PropertyValue, PropPtr, nullptr, PPF_None, nullptr);
+		// Bool columns store a tri-state enum; keep accepting the plain values a bool cell suggests.
+		FString ValueToImport = PropertyValue;
+		if (RowValuesProp->GetFName() == TEXT("RowValuesWithAny"))
+		{
+			if (PropertyValue.Equals(TEXT("true"), ESearchCase::IgnoreCase) || PropertyValue == TEXT("1")) ValueToImport = TEXT("MatchTrue");
+			else if (PropertyValue.Equals(TEXT("false"), ESearchCase::IgnoreCase) || PropertyValue == TEXT("0")) ValueToImport = TEXT("MatchFalse");
+			else if (PropertyValue.Equals(TEXT("any"), ESearchCase::IgnoreCase)) ValueToImport = TEXT("MatchAny");
+		}
+		const TCHAR* ImportResult = Prop->ImportText_Direct(*ValueToImport, PropPtr, nullptr, PPF_None, nullptr);
 		if (!ImportResult)
 		{
 			OutError = FString::Printf(TEXT("Failed to set '%s': import failed for value '%s'"), *PropertyName, *PropertyValue);
@@ -570,8 +625,7 @@ void HandleRemoveChooserRow(const FString& ChooserPath, int32 RowIndex,
 		{
 			FInstancedStruct* ColStruct = reinterpret_cast<FInstancedStruct*>(ColsHelper.GetRawPtr(i));
 			if (!ColStruct || !ColStruct->IsValid()) continue;
-			UScriptStruct* ColType = const_cast<UScriptStruct*>(ColStruct->GetScriptStruct());
-			if (FArrayProperty* RVProp = FindFProperty<FArrayProperty>(ColType, TEXT("RowValues")))
+			if (FArrayProperty* RVProp = GetColumnRowValuesProp(*ColStruct))
 			{
 				void* ColMem = ColStruct->GetMutableMemory();
 				FScriptArrayHelper RVHelper(RVProp, RVProp->ContainerPtrToValuePtr<void>(ColMem));
@@ -808,27 +862,11 @@ void HandleDuplicateChooserRow(const FString& ChooserPath, int32 RowIndex,
 	{
 		FInstancedStruct* ColStruct = reinterpret_cast<FInstancedStruct*>(ColsHelper.GetRawPtr(i));
 		if (!ColStruct || !ColStruct->IsValid()) continue;
-		UScriptStruct* ColType = const_cast<UScriptStruct*>(ColStruct->GetScriptStruct());
-		FArrayProperty* RVProp = FindFProperty<FArrayProperty>(ColType, TEXT("RowValues"));
-		if (!RVProp) continue;
+		FChooserColumnBase* Column = ColStruct->GetMutablePtr<FChooserColumnBase>();
+		if (!Column) continue;
 
-		void* ColMem = ColStruct->GetMutableMemory();
-		FScriptArrayHelper RVHelper(RVProp, RVProp->ContainerPtrToValuePtr<void>(ColMem));
-
-		if (!RVHelper.IsValidIndex(RowIndex)) { RVHelper.AddValue(); continue; }
-
-		FStructProperty* InnerProp = CastField<FStructProperty>(RVProp->Inner);
-		if (!InnerProp) { RVHelper.AddValue(); continue; }
-
-		UScriptStruct* CellType = InnerProp->Struct;
-		int32 CellSize = CellType->GetStructureSize();
-
-		TArray<uint8> CellSnap;
-		CellSnap.SetNumUninitialized(CellSize);
-		CellType->CopyScriptStruct(CellSnap.GetData(), RVHelper.GetRawPtr(RowIndex));
-
-		const int32 NewCellIdx = RVHelper.AddValue();
-		CellType->CopyScriptStruct(RVHelper.GetRawPtr(NewCellIdx), CellSnap.GetData());
+		Column->SetNumRows(ResultsHelper.Num());
+		Column->CopyRow(*Column, RowIndex, NewRowIdx);
 	}
 
 	Table->Modify();
@@ -882,8 +920,7 @@ void HandleReorderChooserRows(const FString& ChooserPath, int32 FromIndex, int32
 	{
 		FInstancedStruct* ColStruct = reinterpret_cast<FInstancedStruct*>(ColsHelper.GetRawPtr(i));
 		if (!ColStruct || !ColStruct->IsValid()) continue;
-		UScriptStruct* ColType = const_cast<UScriptStruct*>(ColStruct->GetScriptStruct());
-		FArrayProperty* RVProp = FindFProperty<FArrayProperty>(ColType, TEXT("RowValues"));
+		FArrayProperty* RVProp = GetColumnRowValuesProp(*ColStruct);
 		if (!RVProp) continue;
 		void* ColMem = ColStruct->GetMutableMemory();
 		FScriptArrayHelper RVHelper(RVProp, RVProp->ContainerPtrToValuePtr<void>(ColMem));
@@ -920,28 +957,35 @@ void HandleGetChooserRowValues(const FString& ChooserPath, int32 RowIndex,
 		if (!ColStruct || !ColStruct->IsValid()) continue;
 
 		UScriptStruct* ColType = const_cast<UScriptStruct*>(ColStruct->GetScriptStruct());
-		FArrayProperty* RVProp = FindFProperty<FArrayProperty>(ColType, TEXT("RowValues"));
+		FArrayProperty* RVProp = GetColumnRowValuesProp(*ColStruct);
 		if (!RVProp) continue;
 
 		void* ColMem = ColStruct->GetMutableMemory();
 		FScriptArrayHelper RVHelper(RVProp, RVProp->ContainerPtrToValuePtr<void>(ColMem));
 		if (!RVHelper.IsValidIndex(RowIndex)) continue;
 
-		FStructProperty* CellProp = CastField<FStructProperty>(RVProp->Inner);
-		if (!CellProp) continue;
-
 		void* CellPtr = RVHelper.GetRawPtr(RowIndex);
 		FString PropsJson = TEXT("[");
-		bool bFirstProp = true;
-		for (TFieldIterator<FProperty> It(CellProp->Struct); It; ++It)
+		if (FStructProperty* CellProp = CastField<FStructProperty>(RVProp->Inner))
 		{
-			FProperty* P = *It;
+			bool bFirstProp = true;
+			for (TFieldIterator<FProperty> It(CellProp->Struct); It; ++It)
+			{
+				FProperty* P = *It;
+				FString Val;
+				P->ExportTextItem_Direct(Val, P->ContainerPtrToValuePtr<void>(CellPtr), nullptr, nullptr, PPF_None);
+				FString SafeVal = Val.Replace(TEXT("\""), TEXT("\\\""));
+				if (!bFirstProp) PropsJson += TEXT(",");
+				PropsJson += FString::Printf(TEXT("{\"name\":\"%s\",\"value\":\"%s\"}"), *P->GetName(), *SafeVal);
+				bFirstProp = false;
+			}
+		}
+		else
+		{
+			// Bare cells (bool, float, name...) have no sub-properties.
 			FString Val;
-			P->ExportTextItem_Direct(Val, P->ContainerPtrToValuePtr<void>(CellPtr), nullptr, nullptr, PPF_None);
-			FString SafeVal = Val.Replace(TEXT("\""), TEXT("\\\""));
-			if (!bFirstProp) PropsJson += TEXT(",");
-			PropsJson += FString::Printf(TEXT("{\"name\":\"%s\",\"value\":\"%s\"}"), *P->GetName(), *SafeVal);
-			bFirstProp = false;
+			RVProp->Inner->ExportTextItem_Direct(Val, CellPtr, nullptr, nullptr, PPF_None);
+			PropsJson += FString::Printf(TEXT("{\"name\":\"Value\",\"value\":\"%s\"}"), *Val.Replace(TEXT("\""), TEXT("\\\"")));
 		}
 		PropsJson += TEXT("]");
 
@@ -1355,7 +1399,7 @@ void HandleCreateChooserTableFromArgs(const TSharedPtr<FJsonObject>& Args,
 {
 	if (!Args.IsValid()) { OutError = TEXT("Invalid args"); return; }
 	FString AssetName = TEXT("CT_New"), SavePath, OutputClass;
-	Args->TryGetStringField(TEXT("asset_name"), AssetName);
+	if (!Args->TryGetStringField(TEXT("asset_name"), AssetName)) Args->TryGetStringField(TEXT("name"), AssetName);
 	Args->TryGetStringField(TEXT("save_path"), SavePath);
 	Args->TryGetStringField(TEXT("output_class"), OutputClass);
 	if (SavePath.IsEmpty()) SavePath = FSettingsManager::GetDefaultSavePath();

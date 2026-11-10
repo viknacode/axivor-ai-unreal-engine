@@ -3012,7 +3012,7 @@ body.input-compact .input-area::before{background:var(--accent)}
 <div class="footer">
   <span class="ax-status-brand" title="Axivor AI"><span class="ax-dot"></span>Axivor AI</span>
   <span class="ax-turbo-chip" id="ax-turbo-chip" title="Modo Turbo ativo: a IA executa sem pedir confirmação"><svg class="icon" viewBox="0 0 24 24"><use href="#ic-zap"/></svg>Turbo</span>
-  <span class="ax-sandbox" id="ax-sandbox" title="File Sandbox do UE 5.8: as gravações da IA ficam capturadas até você aplicar ou descartar"><svg class="icon" viewBox="0 0 24 24"><use href="#ic-box"/></svg><span>Sandbox <b id="ax-sandbox-count">0</b></span><button class="apply" onclick="app('sandboxcommand','persist')">Aplicar</button><button onclick="AX.sandboxDiscard()">Descartar</button><button onclick="app('sandboxcommand','leave')" title="Sair do sandbox">Sair</button></span>
+  <span class="ax-sandbox" id="ax-sandbox" title="File Sandbox do UE 5.9: as gravações da IA ficam capturadas até você aplicar ou descartar"><svg class="icon" viewBox="0 0 24 24"><use href="#ic-box"/></svg><span>Sandbox <b id="ax-sandbox-count">0</b></span><button class="apply" onclick="app('sandboxcommand','persist')">Aplicar</button><button onclick="AX.sandboxDiscard()">Descartar</button><button onclick="app('sandboxcommand','leave')" title="Sair do sandbox">Sair</button></span>
   <button class="foot-btn" onclick="app('opensettings')"><svg class="icon" width="13" height="13" viewBox="0 0 24 24"><use href="#ic-settings"/></svg> <span data-i18n="foot_settings">Settings</span></button>
   <button class="foot-btn" onclick="showOverlay('instructions')"><svg class="icon" width="13" height="13" viewBox="0 0 24 24"><use href="#ic-file-text"/></svg> <span data-i18n="foot_instructions">Instructions</span></button>
   <button class="foot-btn" onclick="showOverlay('gdd')"><svg class="icon" width="13" height="13" viewBox="0 0 24 24"><use href="#ic-clipboard"/></svg> <span data-i18n="foot_gdd">GDD</span></button>
@@ -8204,11 +8204,11 @@ function _modelContextWindow(model, provider) {
   // HTTP-direct models: substring match on resolved model name.
   if (/opus-?4-?7|opus-?4\.7/.test(m))                 return 1000000;
   if (m.indexOf('opus') >= 0 || m.indexOf('sonnet') >= 0 || m.indexOf('claude') >= 0) return 200000;
-  if (m.indexOf('gpt-5') >= 0)                         return 400000;
+  if (m.indexOf('gpt-6') >= 0 || m.indexOf('astra') >= 0 || m.indexOf('gpt-5') >= 0) return 400000;
   if (/gpt-4o|gpt-4\.1|gpt-4-turbo/.test(m))           return 128000;
   if (m.indexOf('gpt-4') >= 0)                         return 8192;
   if (m.indexOf('gpt-3.5') >= 0)                       return 16000;
-  if (/gemini-2|gemini-1\.5/.test(m))                  return 1000000;
+  if (/gemini-3|gemini-2|gemini-1\.5/.test(m))                  return 1000000;
   if (m.indexOf('gemini') >= 0)                        return 30000;
   if (m.indexOf('deepseek-v4') >= 0)                   return 1000000; // v4 Pro/Flash = 1M
   if (m.indexOf('deepseek') >= 0)                      return 128000;  // v3 and earlier

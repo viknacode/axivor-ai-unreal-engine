@@ -12,6 +12,9 @@
 #include "MovieSceneBindingProxy.h"
 #include "MovieScenePossessable.h"
 #include "MovieSceneSpawnable.h"
+#include "MovieSceneFolder.h"
+#include "MovieSceneTrack.h"
+#include "Decorations/MovieSceneMuteSoloDecoration.h"
 
 #include "EditorAssetLibrary.h"
 #include "Dom/JsonObject.h"
@@ -67,14 +70,121 @@ namespace
 		return 0;
 	}
 
-	void SetOutlinerStateField(UMovieScene* MS, const FString& FieldName, const FString& NodePath, bool bWant, int32& OutChanged)
+	// UE 5.7+ (deprecated arrays ignored by Sequencer in 5.9): mute/solo live on per-object
+	// UMovieSceneMuteSoloDecoration (binding / track / folder). Node paths are resolved by name:
+	//   "<Binding>", "<Binding>.<Track>", "<Track>" (master track), "<Folder>[.<SubFolder>]", or a binding GUID.
+	FString BindingLabel(UMovieScene* MS, const FGuid& Guid)
 	{
-		MS->Modify();
-		TArray<FString>* Target = nullptr;
-		if (FieldName == TEXT("mute"))   Target = &MS->GetMuteNodes();
-		if (FieldName == TEXT("solo"))   Target = &MS->GetSoloNodes();
-		if (FieldName == TEXT("pinned")) Target = &MS->GetEditorData().PinnedNodes;
-		if (Target) OutChanged += ToggleNodePathInArray(*Target, NodePath, bWant);
+		return MS->GetObjectDisplayName(Guid).ToString();
+	}
+
+	bool TrackMatches(const UMovieSceneTrack* Track, const FString& Name)
+	{
+		return Track && (Track->GetDisplayName().ToString().Equals(Name, ESearchCase::IgnoreCase)
+			|| Track->GetName().Equals(Name, ESearchCase::IgnoreCase)
+			|| Track->GetClass()->GetName().Equals(Name, ESearchCase::IgnoreCase));
+	}
+
+	UMovieSceneFolder* FindFolderByPath(TArrayView<UMovieSceneFolder* const> Folders, const TArray<FString>& Segs, int32 Index)
+	{
+		for (UMovieSceneFolder* F : Folders)
+		{
+			if (!F || !F->GetFolderName().ToString().Equals(Segs[Index], ESearchCase::IgnoreCase)) continue;
+			if (Index == Segs.Num() - 1) return F;
+			if (UMovieSceneFolder* Child = FindFolderByPath(F->GetChildFolders(), Segs, Index + 1)) return Child;
+		}
+		return nullptr;
+	}
+
+	// Applies the mute/solo flag; returns 1 when something changed, 0 when already set, -1 when not resolved.
+	int32 ApplyMuteSolo(UMovieScene* MS, const FString& NodePath, bool bMute, bool bWant)
+	{
+		auto Apply = [bMute, bWant](UMovieSceneMuteSoloDecoration* D) -> int32
+		{
+			if (!D) return 0;
+			const bool bCur = bMute ? D->IsMuted() : D->IsSoloed();
+			if (bCur == bWant) return 0;
+			if (bMute) D->SetMuted(bWant); else D->SetSoloed(bWant);
+			return 1;
+		};
+
+		TArray<FString> Segs;
+		NodePath.ParseIntoArray(Segs, TEXT("."), true);
+		if (Segs.IsEmpty()) return -1;
+
+		// Bindings (and their tracks).
+		for (const FMovieSceneBinding& B : static_cast<const UMovieScene*>(MS)->GetBindings())
+		{
+			const FGuid Guid = B.GetObjectGuid();
+			const FString Label = BindingLabel(MS, Guid);
+			const bool bBindingHit = Segs[0].Equals(Label, ESearchCase::IgnoreCase) || Segs[0].Equals(Guid.ToString(), ESearchCase::IgnoreCase);
+			if (!bBindingHit) continue;
+			FMovieSceneBinding* Mutable = MS->FindBinding(Guid);
+			if (!Mutable) continue;
+			if (Segs.Num() == 1)
+			{
+				return Apply(Cast<UMovieSceneMuteSoloDecoration>(Mutable->GetOrCreateDecoration(
+					UMovieSceneMuteSoloDecoration::StaticClass(), MS, [](UObject*) {})));
+			}
+			for (UMovieSceneTrack* T : Mutable->GetTracks())
+				if (TrackMatches(T, Segs.Last())) return Apply(T->GetOrCreateDecoration<UMovieSceneMuteSoloDecoration>());
+		}
+		// Master tracks.
+		if (Segs.Num() == 1)
+			for (UMovieSceneTrack* T : MS->GetTracks())
+				if (TrackMatches(T, Segs[0])) return Apply(T->GetOrCreateDecoration<UMovieSceneMuteSoloDecoration>());
+		// Folders.
+		if (UMovieSceneFolder* F = FindFolderByPath(MS->GetRootFolders(), Segs, 0))
+			return Apply(F->GetOrCreateDecoration<UMovieSceneMuteSoloDecoration>());
+		return -1;
+	}
+
+	const TCHAR* NodeNotFoundHint = TEXT("Use '<Binding>', '<Binding>.<Track>', '<Track>' (master track), '<Folder>[.<SubFolder>]' or a binding GUID; get_outliner_state lists current paths.");
+
+	// Returns false when a mute/solo node path does not resolve to a binding, track or folder.
+	bool SetOutlinerStateField(UMovieScene* MS, const FString& FieldName, const FString& NodePath, bool bWant, int32& OutChanged)
+	{
+		MS->Modify(false);
+		if (FieldName == TEXT("mute") || FieldName == TEXT("solo"))
+		{
+			const int32 R = ApplyMuteSolo(MS, NodePath, FieldName == TEXT("mute"), bWant);
+			if (R < 0) return false;
+			OutChanged += R;
+			return true;
+		}
+		if (FieldName == TEXT("pinned")) OutChanged += ToggleNodePathInArray(MS->GetEditorData().PinnedNodes, NodePath, bWant);
+		return true;
+	}
+
+	// Collects the display paths of every muted / soloed binding, track and folder.
+	void CollectMuteSolo(UMovieScene* MS, TArray<FString>& OutMuted, TArray<FString>& OutSolo)
+	{
+		auto Check = [&](const UMovieSceneMuteSoloDecoration* D, const FString& Path)
+		{
+			if (!D) return;
+			if (D->IsMuted()) OutMuted.Add(Path);
+			if (D->IsSoloed()) OutSolo.Add(Path);
+		};
+		for (const FMovieSceneBinding& B : static_cast<const UMovieScene*>(MS)->GetBindings())
+		{
+			const FString Label = BindingLabel(MS, B.GetObjectGuid());
+			Check(B.FindDecoration<UMovieSceneMuteSoloDecoration>(), Label);
+			for (const UMovieSceneTrack* T : B.GetTracks())
+				if (T) Check(T->FindDecoration<UMovieSceneMuteSoloDecoration>(), Label + TEXT(".") + T->GetDisplayName().ToString());
+		}
+		for (const UMovieSceneTrack* T : MS->GetTracks())
+			if (T) Check(T->FindDecoration<UMovieSceneMuteSoloDecoration>(), T->GetDisplayName().ToString());
+		TFunction<void(TArrayView<UMovieSceneFolder* const>, const FString&)> Walk = [&](TArrayView<UMovieSceneFolder* const> Folders, const FString& Prefix)
+		{
+			for (const UMovieSceneFolder* F : Folders)
+			{
+				if (!F) continue;
+				const FString Path = Prefix + F->GetFolderName().ToString();
+				Check(F->FindDecoration<UMovieSceneMuteSoloDecoration>(), Path);
+				Walk(F->GetChildFolders(), Path + TEXT("."));
+			}
+		};
+		Walk(MS->GetRootFolders(), FString());
 	}
 }
 
@@ -97,7 +207,7 @@ void HandleAddMarkedFrameFromArgs(const TSharedPtr<FJsonObject>& Args, FString& 
 			FString Label; Entry->TryGetStringField(TEXT("label"), Label);
 
 			FMovieSceneMarkedFrame Mark;
-			Mark.FrameNumber = FFrameNumber(Frame);
+			Mark.SetRangeStartAndEnd(FFrameNumber(Frame)); // UE 5.9: FrameNumber no longer drives the mark
 			Mark.Label = Label;
 			const int32 Idx = MS->AddMarkedFrame(Mark);
 
@@ -116,7 +226,7 @@ void HandleAddMarkedFrameFromArgs(const TSharedPtr<FJsonObject>& Args, FString& 
 
 	MS->Modify();
 	FMovieSceneMarkedFrame Mark;
-	Mark.FrameNumber = FFrameNumber(Frame);
+	Mark.SetRangeStartAndEnd(FFrameNumber(Frame)); // UE 5.9: FrameNumber no longer drives the mark
 	Mark.Label = Label;
 	const int32 Idx = MS->AddMarkedFrame(Mark);
 
@@ -222,7 +332,7 @@ void HandleFindMarkedFrameByLabelFromArgs(const TSharedPtr<FJsonObject>& Args, F
 	if (Idx != INDEX_NONE)
 	{
 		const FMovieSceneMarkedFrame& Mark = MS->GetMarkedFrames()[Idx];
-		R->SetNumberField(TEXT("frame"), Mark.FrameNumber.Value);
+		R->SetNumberField(TEXT("frame"), Mark.GetStartFrame().Value);
 		R->SetStringField(TEXT("label"), Mark.Label);
 	}
 	OutJson = SerializeJson(R);
@@ -241,7 +351,7 @@ void HandleGetMarkedFramesFromArgs(const TSharedPtr<FJsonObject>& Args, FString&
 		const FMovieSceneMarkedFrame& Mark = Marks[i];
 		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
 		Entry->SetNumberField(TEXT("index"), i);
-		Entry->SetNumberField(TEXT("frame"), Mark.FrameNumber.Value);
+		Entry->SetNumberField(TEXT("frame"), Mark.GetStartFrame().Value);
 		Entry->SetStringField(TEXT("label"), Mark.Label);
 		Entry->SetBoolField(TEXT("is_determinism_fence"), Mark.bIsDeterminismFence);
 		Arr.Add(MakeShared<FJsonValueObject>(Entry));
@@ -291,7 +401,11 @@ namespace
 				FString NodePath; Entry->TryGetStringField(TEXT("node_path"), NodePath);
 				bool bWant = false; Entry->TryGetBoolField(BoolKey, bWant);
 				if (NodePath.IsEmpty()) { Batch.AddFailure(i, TEXT("node_path required")); continue; }
-				SetOutlinerStateField(MS, FieldName, NodePath, bWant, Changed);
+				if (!SetOutlinerStateField(MS, FieldName, NodePath, bWant, Changed))
+				{
+					Batch.AddFailure(i, FString::Printf(TEXT("Node '%s' not found. %s"), *NodePath, NodeNotFoundHint));
+					continue;
+				}
 				TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
 				R->SetStringField(TEXT("node_path"), NodePath);
 				R->SetBoolField(BoolKey, bWant);
@@ -305,7 +419,11 @@ namespace
 		bool bWant = false; Args->TryGetBoolField(BoolKey, bWant);
 		if (NodePath.IsEmpty()) { OutError = TEXT("node_path required"); return; }
 		int32 Changed = 0;
-		SetOutlinerStateField(MS, FieldName, NodePath, bWant, Changed);
+		if (!SetOutlinerStateField(MS, FieldName, NodePath, bWant, Changed))
+		{
+			OutError = FString::Printf(TEXT("Node '%s' not found in '%s'. %s"), *NodePath, *SequencePath, NodeNotFoundHint);
+			return;
+		}
 
 		TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
 		R->SetBoolField(TEXT("success"), true);
@@ -346,8 +464,10 @@ void HandleGetOutlinerStateFromArgs(const TSharedPtr<FJsonObject>& Args, FString
 
 	TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
 	R->SetBoolField(TEXT("success"), true);
-	R->SetArrayField(TEXT("muted"),  ToJsonStringArray(MS->GetMuteNodes()));
-	R->SetArrayField(TEXT("solo"),   ToJsonStringArray(MS->GetSoloNodes()));
+	TArray<FString> Muted, Solo;
+	CollectMuteSolo(MS, Muted, Solo);
+	R->SetArrayField(TEXT("muted"),  ToJsonStringArray(Muted));
+	R->SetArrayField(TEXT("solo"),   ToJsonStringArray(Solo));
 	R->SetArrayField(TEXT("pinned"), ToJsonStringArray(MS->GetEditorData().PinnedNodes));
 	R->SetBoolField(TEXT("playback_range_locked"), MS->IsPlaybackRangeLocked());
 	R->SetBoolField(TEXT("marked_frames_locked"),  MS->AreMarkedFramesLocked());

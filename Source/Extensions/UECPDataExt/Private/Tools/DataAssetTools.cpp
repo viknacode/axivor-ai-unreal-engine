@@ -39,43 +39,43 @@ void HandleGetDataAssetDetails(const FString& AssetPath, FString& OutDetailsJson
 
 	if (UUserDefinedEnum* Enum = Cast<UUserDefinedEnum>(Asset))
 	{
-		RootObject->SetStringField("type", "Enum");
+		RootObject->SetStringField(TEXT("type"), "Enum");
 		TArray<TSharedPtr<FJsonValue>> EnumValues;
 		for (int32 i = 0; i < Enum->NumEnums() - 1; ++i)
 		{
 			FString DisplayName = Enum->GetDisplayNameTextByIndex(i).ToString();
 			EnumValues.Add(MakeShareable(new FJsonValueString(DisplayName)));
 		}
-		RootObject->SetArrayField("values", EnumValues);
+		RootObject->SetArrayField(TEXT("values"), EnumValues);
 	}
 	else if (UUserDefinedStruct* Struct = Cast<UUserDefinedStruct>(Asset))
 	{
-		RootObject->SetStringField("type", "Struct");
+		RootObject->SetStringField(TEXT("type"), "Struct");
 		TArray<TSharedPtr<FJsonValue>> StructMembers;
 		const TArray<FStructVariableDescription>& VarDescriptions = FStructureEditorUtils::GetVarDesc(Struct);
 
 		for (const FStructVariableDescription& VarDesc : VarDescriptions)
 		{
 			TSharedPtr<FJsonObject> MemberObject = MakeShareable(new FJsonObject());
-			MemberObject->SetStringField("name", VarDesc.VarName.ToString());
+			MemberObject->SetStringField(TEXT("name"), VarDesc.VarName.ToString());
 
 			FEdGraphPinType PinType = VarDesc.ToPinType();
 			if (PinType.PinSubCategoryObject.IsValid())
-				MemberObject->SetStringField("type", PinType.PinSubCategoryObject->GetName());
+				MemberObject->SetStringField(TEXT("type"), PinType.PinSubCategoryObject->GetName());
 			else
-				MemberObject->SetStringField("type", PinType.PinCategory.ToString());
+				MemberObject->SetStringField(TEXT("type"), PinType.PinCategory.ToString());
 			if (!VarDesc.DefaultValue.IsEmpty())
-				MemberObject->SetStringField("default_value", VarDesc.DefaultValue);
+				MemberObject->SetStringField(TEXT("default_value"), VarDesc.DefaultValue);
 			StructMembers.Add(MakeShareable(new FJsonValueObject(MemberObject)));
 		}
-		RootObject->SetArrayField("members", StructMembers);
+		RootObject->SetArrayField(TEXT("members"), StructMembers);
 	}
 	else if (Asset->IsA<UBlueprint>())
 	{
 		UClass* BpClass = Cast<UBlueprint>(Asset)->GeneratedClass;
 		if (BpClass)
 		{
-			RootObject->SetStringField("type", "Blueprint");
+			RootObject->SetStringField(TEXT("type"), "Blueprint");
 			TArray<TSharedPtr<FJsonValue>> BpMembers;
 			for (TFieldIterator<FProperty> PropIt(BpClass); PropIt; ++PropIt)
 			{
@@ -83,24 +83,24 @@ void HandleGetDataAssetDetails(const FString& AssetPath, FString& OutDetailsJson
 				if (Property && Property->HasAnyPropertyFlags(CPF_Edit) && Property->GetOwnerClass() == BpClass)
 				{
 					TSharedPtr<FJsonObject> MemberObject = MakeShareable(new FJsonObject());
-					MemberObject->SetStringField("name", Property->GetName());
-					MemberObject->SetStringField("type", Property->GetClass()->GetName());
+					MemberObject->SetStringField(TEXT("name"), Property->GetName());
+					MemberObject->SetStringField(TEXT("type"), Property->GetClass()->GetName());
 					UObject* CDO = BpClass->GetDefaultObject();
 					if (CDO)
 					{
 						FString ValueStr;
 						Property->ExportTextItem_Direct(ValueStr, Property->ContainerPtrToValuePtr<void>(CDO), nullptr, CDO, PPF_None);
-						if (!ValueStr.IsEmpty()) MemberObject->SetStringField("value", ValueStr);
+						if (!ValueStr.IsEmpty()) MemberObject->SetStringField(TEXT("value"), ValueStr);
 					}
 					BpMembers.Add(MakeShareable(new FJsonValueObject(MemberObject)));
 				}
 			}
-			RootObject->SetArrayField("members", BpMembers);
+			RootObject->SetArrayField(TEXT("members"), BpMembers);
 		}
 	}
 	else
 	{
-		RootObject->SetStringField("type", "DataObject");
+		RootObject->SetStringField(TEXT("type"), "DataObject");
 		TArray<TSharedPtr<FJsonValue>> Members;
 		int32 BrokenRefCount = 0;
 		for (TFieldIterator<FProperty> PropIt(Asset->GetClass()); PropIt; ++PropIt)
@@ -109,8 +109,8 @@ void HandleGetDataAssetDetails(const FString& AssetPath, FString& OutDetailsJson
 			if (Property && Property->HasAnyPropertyFlags(CPF_Edit))
 			{
 				TSharedPtr<FJsonObject> MemberObject = MakeShareable(new FJsonObject());
-				MemberObject->SetStringField("name", Property->GetName());
-				MemberObject->SetStringField("type", Property->GetClass()->GetName());
+				MemberObject->SetStringField(TEXT("name"), Property->GetName());
+				MemberObject->SetStringField(TEXT("type"), Property->GetClass()->GetName());
 				FString ValueStr;
 				if (const FDoubleProperty* DP = CastField<FDoubleProperty>(Property))
 					ValueStr = FString::SanitizeFloat(DP->GetPropertyValue_InContainer(Asset));
@@ -126,7 +126,7 @@ void HandleGetDataAssetDetails(const FString& AssetPath, FString& OutDetailsJson
 					ValueStr = NP->GetPropertyValue_InContainer(Asset).ToString();
 				else
 					Property->ExportTextItem_Direct(ValueStr, Property->ContainerPtrToValuePtr<void>(Asset), nullptr, Asset, PPF_None);
-				if (!ValueStr.IsEmpty()) MemberObject->SetStringField("value", ValueStr);
+				if (!ValueStr.IsEmpty()) MemberObject->SetStringField(TEXT("value"), ValueStr);
 
 				if (const FObjectProperty* OP = CastField<FObjectProperty>(Property))
 				{
@@ -155,7 +155,7 @@ void HandleGetDataAssetDetails(const FString& AssetPath, FString& OutDetailsJson
 				Members.Add(MakeShareable(new FJsonValueObject(MemberObject)));
 			}
 		}
-		RootObject->SetArrayField("members", Members);
+		RootObject->SetArrayField(TEXT("members"), Members);
 		if (BrokenRefCount > 0)
 		{
 			RootObject->SetNumberField(TEXT("broken_ref_count"), BrokenRefCount);

@@ -1,16 +1,16 @@
 {
 	"FileVersion": 3,
-	"Version": 10,
-	"VersionName": "1.6.0",
+	"Version": 11,
+	"VersionName": "1.7.0",
 	"FriendlyName": "Axivor AI",
-	"Description": "Axivor AI - engineering copilot for Unreal Engine 5: Architect chat, Project Scanner, multi-agent Crew, generation tools and an integrated MCP server.",
+	"Description": "Axivor AI - engineering copilot for Unreal Engine 5.9: Architect chat, Project Scanner, multi-agent Crew, generation tools, an integrated MCP server and a native 'Axivor' toolset for Unreal MCP / Unreal Assistant.",
 	"Category": "Other",
 	"CreatedBy": "Axivor",
 	"CreatedByURL": "",
 	"DocsURL": "",
 	"MarketplaceURL": "",
 	"SupportURL": "",
-	"EngineVersion": "5.8.0",
+	"EngineVersion": "5.9.0",
 	"CanContainContent": true,
 	"Modules": [
 		{
@@ -157,6 +157,16 @@
 			"Name": "UECPVoice",
 			"Type": "Editor",
 			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac",
+				"Linux"
+			]
+		},
+		{
+			"Name": "ElectronicNodes",
+			"Type": "EditorNoCommandlet",
+			"LoadingPhase": "Default",
 			"PlatformAllowList": [
 				"Win64",
 				"Mac",
@@ -474,6 +484,16 @@
 			]
 		},
 		{
+			"Name": "UECPUE59Ext",
+			"Type": "Editor",
+			"LoadingPhase": "None",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac",
+				"Linux"
+			]
+		},
+		{
 			"Name": "UECPEngineToolsetsExt",
 			"Type": "Editor",
 			"LoadingPhase": "None",
@@ -742,6 +762,13 @@
 		},
 		{
 			"Name": "ChaosVehiclesPlugin",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "Cascade",
 			"Enabled": true,
 			"TargetAllowList": [
 				"Editor"

@@ -43,6 +43,11 @@ public:
 		// Short-lived auth connection: offers terminal login and waits after `initialize`
 		// instead of opening a session, so the caller picks authenticate, logout or session/new.
 		bool bAuthConnection = false;
+
+		// When set, the session first tries to reattach to this agent session (session/resume,
+		// then session/load) so the agent keeps its full context after an editor restart or
+		// crash. Falls back to session/new when the agent cannot resume it.
+		FString ResumeSessionId;
 	};
 
 	bool Start(const FSpawnArgs& InArgs);
@@ -71,6 +76,8 @@ public:
 	EState GetState() const { return State; }
 	bool   IsRunning() const { return State != EState::Uninit && State != EState::Closed; }
 	const FString& GetSessionId() const { return SessionId; }
+	// True when the current session was reattached (resume/load) rather than freshly created.
+	bool WasResumed() const { return bResumed; }
 	const FString& GetAgentName() const { return AgentName; }
 	const FString& GetAgentVersion() const { return AgentVersion; }
 
@@ -95,6 +102,10 @@ public:
 	DECLARE_DELEGATE_TwoParams(FOnAuthSessionFailed, const FString& , int32 );
 	FOnAuthSessionFailed OnAuthSessionFailed;
 
+	// Fired once the session is usable: (sessionId, bResumed).
+	DECLARE_DELEGATE_TwoParams(FOnSessionReady, const FString& , bool );
+	FOnSessionReady OnSessionReady;
+
 	DECLARE_DELEGATE_OneParam(FOnStderrLine, const FString& );
 	FOnStderrLine OnStderrLine;
 
@@ -116,6 +127,10 @@ public:
 private:
 	void SendInitialize();
 	void SendSessionNew();
+	// bUseResume: "session/resume" (no history replay); otherwise "session/load" (replays history,
+	// which is swallowed because the chat already shows it).
+	void SendSessionReattach(bool bUseResume);
+	void FinishSessionReady(const TSharedPtr<FJsonObject>& Result);
 	bool WriteFrame(const FString& Line);
 
 	void HandleResponseFrame     (const TSharedPtr<FJsonObject>& Root);
@@ -137,6 +152,10 @@ private:
 	FSpawnArgs Args;
 	EState     State = EState::Uninit;
 	FString    SessionId;
+	bool       bResumed        = false;
+	bool       bReplayingLoad  = false;
+	bool       bAgentCanLoad   = false;
+	bool       bAgentCanResume = false;
 	FString    AgentName;
 	FString    AgentVersion;
 	int32      NegotiatedVersion = 0;

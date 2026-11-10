@@ -15,7 +15,7 @@ namespace
 	{
 		static const TArray<FName> Names = {
 			TEXT("validate_asset"),
-			TEXT("validate_assets"),
+			TEXT("validate_folder"),
 			TEXT("validate_project"),
 		};
 		return Names;
@@ -40,7 +40,7 @@ void FUECPValidationExtModule::StartupModule()
 
 	// All validation loads and runs UObject validators on the game thread.
 	D.RegisterHandler(TEXT("validate_asset"),   MakeHandler(ValidationTools::HandleValidateAssetFromArgs));
-	D.RegisterHandler(TEXT("validate_assets"),  MakeHandler(ValidationTools::HandleValidateAssetsFromArgs));
+	D.RegisterHandler(TEXT("validate_folder"),  MakeHandler(ValidationTools::HandleValidateAssetsFromArgs));
 	D.RegisterHandler(TEXT("validate_project"), MakeHandler(ValidationTools::HandleValidateProjectFromArgs));
 
 	{
@@ -49,7 +49,7 @@ void FUECPValidationExtModule::StartupModule()
 		{ D.RegisterToolMetadata({ FName(Action), U, FString(Summary), FString(Params) }); };
 
 		Meta(TEXT("validate_asset"),   TEXT("Run Data Validation on a single asset; returns its errors and warnings."), TEXT("asset_path"));
-		Meta(TEXT("validate_assets"),  TEXT("Validate every asset under a content folder (optionally recursive); returns a summary + per-asset issues."), TEXT("folder_path, recursive?, max_reported?"));
+		Meta(TEXT("validate_folder"),  TEXT("Validate every asset under a content folder (optionally recursive); returns a summary + per-asset issues."), TEXT("folder_path, recursive?, max_reported?"));
 		Meta(TEXT("validate_project"), TEXT("Validate all /Game assets; returns totals + the invalid/warning assets (capped). Run before packaging."), TEXT("max_reported?"));
 	}
 

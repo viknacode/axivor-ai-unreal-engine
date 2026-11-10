@@ -129,7 +129,7 @@ namespace
 		{
 			// Prefer the schema derived from registered tool metadata (action enum + typed params);
 			// the bare {action} shape remains the fallback for umbrellas without metadata.
-			TSharedPtr<FJsonObject> Derived = IUECPCoreModule::IsAvailable()
+			TSharedPtr<FJsonObject> Derived = (IUECPCoreModule::IsAvailable() && !UECPToolDispatch::IsLeanToolCatalog())
 				? IUECPCoreModule::Get().GetToolDispatcher().GetUmbrellaSchema(FName(*Entry.Name))
 				: nullptr;
 			if (Derived.IsValid())

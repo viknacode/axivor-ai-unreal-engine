@@ -42,6 +42,7 @@ public class UECPMCPBridge : ModuleRules
 			"Networking",        // FInternetAddr for the probe
 			"UnrealEd",          // editor subsystem hooks
 			"Blutility",         // UMCP_EditorSubsystem inherits from UEditorUtilitySubsystem
+			"ToolsetRegistry",   // UE 5.9: Axivor exposed as a native toolset (Unreal MCP / Unreal Assistant)
 		});
 	}
 }

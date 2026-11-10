@@ -6,6 +6,7 @@
 #include "Auth/McpInfoServiceImpl.h"
 #include "Auth/SessionTokenStore.h"
 #include "Broker/BrokerLeaseManager.h"
+#include "Engine/AxivorEngineToolset.h"
 #include "Transport/HttpSseServer.h"
 
 #include "UECPCoreModule.h"
@@ -56,11 +57,16 @@ void FUECPMCPBridgeModule::StartupModule()
 		IUECPCoreModule::Get().SetMcpInfoService(
 			MakeShared<FMcpInfoServiceImpl>(HttpRaw, BrokerLease.Get()));
 	}
+
+	// UE 5.9: publish the Axivor catalogue as the "Axivor" toolset in the engine registry.
+	UECPEngineToolset::Register();
 }
 
 void FUECPMCPBridgeModule::ShutdownModule()
 {
 	UE_LOG(LogUECPMCPBridge, Log, TEXT("FUECPMCPBridgeModule: ShutdownModule"));
+
+	UECPEngineToolset::Unregister();
 
 	if (IUECPCoreModule::IsAvailable())
 	{

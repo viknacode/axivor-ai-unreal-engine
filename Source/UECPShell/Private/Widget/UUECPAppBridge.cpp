@@ -28,6 +28,7 @@
 #include "SUECPMainWidget.h"
 #include "Managers/PlanManager.h"
 #include "Managers/TaskManager.h"
+#include "Managers/ProviderConfigManager.h"
 #include "SWebBrowser.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Base64.h"
@@ -3867,7 +3868,7 @@ void UUECPAppBridge::PushModelPicker()
 		A->SetBoolField(TEXT("authRequired"), Auth && Auth->bRequired);
 		A->SetBoolField(TEXT("discovering"),  !Snap && W->AgentDiscoveryAttempted.Contains(Entry.Id));
 		A->SetBoolField(TEXT("ready"),        Snap != nullptr && Snap->Models.Num() > 0);
-		if (Snap)
+		if (Snap && Snap->Models.Num() > 0)
 		{
 			FString SavedModel;
 			GConfig->GetString(*Section, *FString::Printf(TEXT("%s.Model"), *Entry.Id), SavedModel, FSettingsManager::GetGlobalConfigPath());
@@ -3886,6 +3887,32 @@ void UUECPAppBridge::PushModelPicker()
 				SecArr.Add(MakeShared<FJsonValueObject>(SObj));
 			}
 			A->SetArrayField(TEXT("sections"), SecArr);
+		}
+		else
+		{
+			TArray<FString> FallbackModels = FProviderConfigManager::Get().GetAgentModels(Entry.Id);
+			if (FallbackModels.Num() == 0)
+			{
+				FallbackModels = FProviderConfigManager::Get().GetAgentModels(Entry.Id.Replace(TEXT("-acp"), TEXT("")));
+			}
+			if (FallbackModels.Num() > 0)
+			{
+				A->SetBoolField(TEXT("ready"), true);
+				FString SavedModel;
+				GConfig->GetString(*Section, *FString::Printf(TEXT("%s.Model"), *Entry.Id), SavedModel, FSettingsManager::GetGlobalConfigPath());
+				A->SetStringField(TEXT("currentModel"), SavedModel.IsEmpty() ? FallbackModels[0] : SavedModel);
+
+				TArray<TSharedPtr<FJsonValue>> FallbackModelVals;
+				for (const FString& MId : FallbackModels)
+				{
+					TSharedRef<FJsonObject> MO = MakeShared<FJsonObject>();
+					MO->SetStringField(TEXT("id"), MId);
+					MO->SetStringField(TEXT("name"), MId);
+					MO->SetStringField(TEXT("description"), TEXT(""));
+					FallbackModelVals.Add(MakeShared<FJsonValueObject>(MO));
+				}
+				A->SetArrayField(TEXT("models"), FallbackModelVals);
+			}
 		}
 		Agents->SetObjectField(Entry.Id, A);
 	}

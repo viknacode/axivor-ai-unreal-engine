@@ -3,13 +3,35 @@
 #include "UECPToolDispatcher.h"
 #include "UECPCoreModule.h"
 #include "Services/IUECPExtensionService.h"
+#include "Managers/SettingsManager.h"
 
 #include "Async/Async.h"
+#include "Containers/Ticker.h"
 #include "Async/TaskGraphInterfaces.h"
 #include "HAL/Event.h"
 #include "HAL/PlatformProcess.h"
+#include "Misc/ScopeExit.h"
 
 #include <initializer_list>
+
+namespace
+{
+	// Game-thread work for editor tools goes through the core ticker instead of
+	// AsyncTask(ENamedThreads::GameThread): task-graph game-thread tasks can run re-entrantly
+	// while the game thread waits on tasks mid-frame (Mass processing, parallel tick phases),
+	// and tools that delete assets / destroy actors there trip engine asserts. The core
+	// ticker fires only from the top of the engine loop.
+	template<typename FuncType>
+	void UECPRunOnGameThreadSafe(FuncType&& Func)
+	{
+		TSharedRef<FuncType, ESPMode::ThreadSafe> Shared = MakeShared<FuncType, ESPMode::ThreadSafe>(Forward<FuncType>(Func));
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Shared](float) -> bool
+		{
+			(*Shared)();
+			return false;
+		}));
+	}
+}
 
 namespace
 {
@@ -607,6 +629,13 @@ FString UECPToolDispatch::InferParamJsonType(const FString& Name, const FString&
 	return UECPParamSpec::InferType(Name, Rest);
 }
 
+bool UECPToolDispatch::IsLeanToolCatalog()
+{
+	bool bLean = true;
+	if (GConfig) GConfig->GetBool(TEXT("BpGeneratorUltimate"), TEXT("LeanToolCatalog"), bLean, FSettingsManager::GetGlobalConfigPath());
+	return bLean;
+}
+
 bool UECPToolDispatch::IsUmbrellaName(FName Name)
 {
 	static const TSet<FName> SeedUmbrellas = {
@@ -691,6 +720,16 @@ void FUECPToolDispatcherImpl::UnregisterHandler(FName ToolName)
 
 FUECPToolResult FUECPToolDispatcherImpl::ExecuteFromArgs(FName ToolName, const TSharedPtr<FJsonObject>& Args)
 {
+	const double ToolStartSeconds = FPlatformTime::Seconds();
+	ON_SCOPE_EXIT
+	{
+		const double ToolMs = (FPlatformTime::Seconds() - ToolStartSeconds) * 1000.0;
+		if (ToolMs >= 100.0)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[Architect][tool] %s took %.0f ms"), *ToolName.ToString(), ToolMs);
+		}
+	};
+
 	NormalizePathArgs(Args);
 
 	FToolHandler Handler;
@@ -739,11 +778,18 @@ FUECPToolResult FUECPToolDispatcherImpl::ExecuteFromArgs(FName ToolName, const T
 		TSharedPtr<FGtDispatchState, ESPMode::ThreadSafe> State = MakeShared<FGtDispatchState, ESPMode::ThreadSafe>();
 		State->Event = FPlatformProcess::GetSynchEventFromPool(false);
 
-		AsyncTask(ENamedThreads::GameThread, [Handler, Args, State]()
+		// Run on the core ticker, not as a task-graph game-thread task: AsyncTask(GameThread)
+		// work is also executed re-entrantly whenever the game thread waits on tasks mid-frame
+		// (e.g. inside Mass processing or parallel world tick phases). Editor tools that delete
+		// assets, collect garbage or destroy actors/entities there trip engine asserts such as
+		// "FMassEntityManager::BatchDestroyEntities called during mass processing" (seen on 5.9).
+		// The core ticker only fires from the top of the engine loop, outside the world tick.
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Handler, Args, State](float) -> bool
 		{
 			State->Result = Handler(Args);
 			State->Event->Trigger();
-		});
+			return false; // one-shot
+		}));
 
 		// 120s upper bound: long enough for slow-but-legitimate game-thread work
 		// (asset saves, cooks-in-editor), short enough that a truly stuck editor
@@ -905,7 +951,7 @@ void FUECPToolDispatcherImpl::ExecuteFromArgsAsync(FName ToolName, const TShared
 		if (OnComplete)
 		{
 			if (IsInGameThread()) OnComplete(MoveTemp(R));
-			else AsyncTask(ENamedThreads::GameThread,
+			else UECPRunOnGameThreadSafe(
 				[R = MoveTemp(R), OnComplete = MoveTemp(OnComplete)]() mutable { OnComplete(MoveTemp(R)); });
 		}
 		return;
@@ -918,7 +964,7 @@ void FUECPToolDispatcherImpl::ExecuteFromArgsAsync(FName ToolName, const TShared
 	{
 		if (!OnComplete) return;
 		if (IsInGameThread()) OnComplete(MoveTemp(R));
-		else AsyncTask(ENamedThreads::GameThread,
+		else UECPRunOnGameThreadSafe(
 			[R = MoveTemp(R), OnComplete = MoveTemp(OnComplete)]() mutable { OnComplete(MoveTemp(R)); });
 	};
 
@@ -930,7 +976,7 @@ void FUECPToolDispatcherImpl::ExecuteFromArgsAsync(FName ToolName, const TShared
 
 	if (bRequiresGT)
 	{
-		AsyncTask(ENamedThreads::GameThread,
+		UECPRunOnGameThreadSafe(
 			[HandlerCopy, Args, DeliverOnGT = MoveTemp(DeliverOnGT)]() mutable
 			{
 				DeliverOnGT(HandlerCopy(Args));

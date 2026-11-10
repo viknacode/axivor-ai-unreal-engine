@@ -106,6 +106,11 @@ namespace UECPToolDispatch
 
 	UECPCORE_API bool IsUmbrellaName(FName Name);
 
+	// `[BpGeneratorUltimate] LeanToolCatalog` (default true): tool lists sent to models carry only
+	// the umbrella {action} shape, and action + params are fetched on demand through search_tools
+	// and get_tool_docs. The full derived schemas cost tens of thousands of tokens per request.
+	UECPCORE_API bool IsLeanToolCatalog();
+
 	// Parses a FUECPToolMeta::Params spec into named parameters (see FUECPToolMeta for the
 	// convention). Tokens that carry no identifier (e.g. "...", "<properties>") are skipped and
 	// reported through OutUnparseable. Returns false when at least one token was skipped.

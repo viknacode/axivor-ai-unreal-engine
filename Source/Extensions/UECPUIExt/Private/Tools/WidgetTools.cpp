@@ -69,8 +69,8 @@ void RecursivelyGetProperties(UStruct* InStruct, const FString& Prefix, TArray<T
 			if (FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 			{
 				TSharedPtr<FJsonObject> StructPropObject = MakeShareable(new FJsonObject());
-				StructPropObject->SetStringField("name", PropName);
-				StructPropObject->SetStringField("type", StructProperty->Struct->GetName());
+				StructPropObject->SetStringField(TEXT("name"), PropName);
+				StructPropObject->SetStringField(TEXT("type"), StructProperty->Struct->GetName());
 				OutPropertiesArray.Add(MakeShareable(new FJsonValueObject(StructPropObject)));
 
 				RecursivelyGetProperties(StructProperty->Struct, PropName + TEXT("."), OutPropertiesArray, Depth + 1);
@@ -78,8 +78,8 @@ void RecursivelyGetProperties(UStruct* InStruct, const FString& Prefix, TArray<T
 			else
 			{
 				TSharedPtr<FJsonObject> PropObject = MakeShareable(new FJsonObject());
-				PropObject->SetStringField("name", PropName);
-				PropObject->SetStringField("type", Property->GetCPPType());
+				PropObject->SetStringField(TEXT("name"), PropName);
+				PropObject->SetStringField(TEXT("type"), Property->GetCPPType());
 				OutPropertiesArray.Add(MakeShareable(new FJsonValueObject(PropObject)));
 			}
 		}

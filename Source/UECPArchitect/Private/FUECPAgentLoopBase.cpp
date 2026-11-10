@@ -244,7 +244,7 @@ bool FUECPAgentLoopBase::TryScheduleTransientRetry(bool bWasSuccessful, int32 Co
 	// A transport failure after deltas already reached the UI cannot be replayed transparently.
 	if (bRoundHadOutput && (!bWasSuccessful || Code == 0)) return false;
 
-	static const float BackoffSeconds[MaxTransientRetries] = { 1.0f, 3.0f, 8.0f };
+	static const float BackoffSeconds[MaxTransientRetries] = { 2.0f, 5.0f, 12.0f, 25.0f, 45.0f };
 	float DelaySec = BackoffSeconds[FMath::Clamp(TransientRetryCount, 0, MaxTransientRetries - 1)];
 
 	// Provider hints (Retry-After / "try again in Ns") only ever lengthen the wait.
@@ -259,16 +259,18 @@ bool FUECPAgentLoopBase::TryScheduleTransientRetry(bool bWasSuccessful, int32 Co
 		if (!RA.IsEmpty())
 		{
 			const float RASec = FCString::Atof(*RA);
-			if (RASec > 0.0f) DelaySec = FMath::Max(DelaySec, FMath::Min(RASec, 30.0f));
+			if (RASec > 0.0f) DelaySec = FMath::Max(DelaySec, FMath::Min(RASec + 1.0f, 60.0f));
 		}
 	}
 	DelaySec += FMath::FRandRange(0.0f, 0.5f);
 
 	++TransientRetryCount;
-	UE_LOG(LogTemp, Log, TEXT("[Architect] %s %s — auto-retry %d/%d in %.2fs"),
+	UE_LOG(LogTemp, Log, TEXT("[Architect] %s %s — auto-retry %d/%d in %.2fs%s%s"),
 		*(Provider.IsEmpty() ? FString(TEXT("provider")) : Provider),
 		(!bWasSuccessful || Code == 0) ? TEXT("connection failed") : *FString::Printf(TEXT("HTTP %d"), Code),
-		TransientRetryCount, MaxTransientRetries, DelaySec);
+		TransientRetryCount, MaxTransientRetries, DelaySec,
+		Body.IsEmpty() ? TEXT("") : TEXT(", body: "),
+		Body.IsEmpty() ? TEXT("") : *Body.Left(250));
 
 	TWeakPtr<FUECPAgentLoopBase> Weak = AsWeakBase();
 	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
@@ -357,11 +359,57 @@ bool FUECPAgentLoopBase::IsRunning() const
 	return State == EState::Streaming || State == EState::Dispatching;
 }
 
+void FUECPAgentLoopBase::BeginRoundTelemetry(const TCHAR* Provider, int32 RequestChars)
+{
+	const double Now = FPlatformTime::Seconds();
+	if (RoundEndSeconds > 0.0) LoopToolSeconds += Now - RoundEndSeconds;
+	TelemetryProvider   = Provider;
+	RoundRequestChars   = RequestChars;
+	RoundStartSeconds   = Now;
+	RoundCachedTokens     = 0;
+	RoundCacheWriteTokens = 0;
+	RoundThinkingTokens   = 0;
+	bRoundTelemetryOpen = true;
+}
+
+void FUECPAgentLoopBase::EndRoundTelemetry()
+{
+	if (!bRoundTelemetryOpen) return;
+	bRoundTelemetryOpen = false;
+	RoundEndSeconds = FPlatformTime::Seconds();
+	const double ModelSeconds = RoundEndSeconds - RoundStartSeconds;
+
+	++RoundsLogged;
+	LoopModelSeconds     += ModelSeconds;
+	LoopInputTokens      += FinalInputTokens;
+	LoopCachedTokens     += RoundCachedTokens;
+	LoopCacheWriteTokens += RoundCacheWriteTokens;
+	LoopOutputTokens     += FinalOutputTokens;
+	LoopThinkingTokens   += RoundThinkingTokens;
+
+	UE_LOG(LogTemp, Log, TEXT("[Architect][usage] %s round=%d input=%d cached=%d cache_write=%d output=%d thinking=%d request_chars=%d model_s=%.1f"),
+		*TelemetryProvider, Round, FinalInputTokens, RoundCachedTokens, RoundCacheWriteTokens,
+		FinalOutputTokens, RoundThinkingTokens, RoundRequestChars, ModelSeconds);
+}
+
 void FUECPAgentLoopBase::Finish(bool bSuccess, const FString& Error)
 {
 	if (State == EState::Done) return;
 	State = EState::Done;
 	ActiveRequest = nullptr;
+
+	EndRoundTelemetry();
+	if (RoundsLogged > 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Architect][usage] %s total rounds=%d input=%lld cached=%lld cache_write=%lld output=%lld thinking=%lld tool_calls=%d model_s=%.1f tool_s=%.1f"),
+			*TelemetryProvider, RoundsLogged, LoopInputTokens, LoopCachedTokens, LoopCacheWriteTokens,
+			LoopOutputTokens, LoopThinkingTokens, ToolCallsThisLoop, LoopModelSeconds, LoopToolSeconds);
+
+		// The conversation counter adds these once per loop: report every round, not just the last.
+		FinalInputTokens  = (int32)FMath::Min<int64>(LoopInputTokens, MAX_int32);
+		FinalOutputTokens = (int32)FMath::Min<int64>(LoopOutputTokens, MAX_int32);
+	}
+
 	if (OnDone) OnDone(bSuccess, Error);
 }
 
@@ -463,12 +511,12 @@ bool FUECPAgentLoopBase::ParseRetry429Delay(int32 Code, const FString& Body,
 	if (Code != 429) return false;
 
 	{
-		const FRegexPattern Pat(TEXT("try again in ([0-9]+(?:\\.[0-9]+)?)\\s*(s|ms)"));
+		const FRegexPattern Pat(TEXT("try again in ([0-9]+(?:\\.[0-9]+)?)\\s*(s|ms|sec|seconds)?"));
 		FRegexMatcher Matcher(Pat, Body);
 		if (Matcher.FindNext())
 		{
 			const float N = FCString::Atof(*Matcher.GetCaptureGroup(1));
-			const FString Unit = Matcher.GetCaptureGroup(2);
+			const FString Unit = Matcher.GetCaptureGroup(2).ToLower();
 			OutDelaySec = (Unit == TEXT("ms")) ? (N / 1000.0f) : N;
 		}
 	}
@@ -482,8 +530,17 @@ bool FUECPAgentLoopBase::ParseRetry429Delay(int32 Code, const FString& Body,
 		}
 	}
 
-	if (OutDelaySec <= 0.0f) OutDelaySec = 2.0f;
-	OutDelaySec = FMath::Clamp(OutDelaySec, 0.5f, 8.0f);
+	if (OutDelaySec <= 0.0f)
+	{
+		OutDelaySec = 3.0f;
+	}
+	else
+	{
+		// Add a 1.0s safety buffer so retry fires strictly after the server-side cooldown window has elapsed
+		OutDelaySec += 1.0f;
+	}
+
+	OutDelaySec = FMath::Clamp(OutDelaySec, 1.0f, 60.0f);
 	return true;
 }
 
@@ -692,7 +749,7 @@ TArray<FUECPToolCatalogEntry> FUECPAgentLoopBase::GetStandardToolEntries()
 		IUECPToolDispatcher& Dispatcher = IUECPCoreModule::Get().GetToolDispatcher();
 		for (FUECPToolCatalogEntry& E : Result)
 		{
-			if (E.bIsUmbrella && !E.InputSchema.IsValid())
+			if (E.bIsUmbrella && !E.InputSchema.IsValid() && !UECPToolDispatch::IsLeanToolCatalog())
 			{
 				E.InputSchema = Dispatcher.GetUmbrellaSchema(FName(*E.Name));
 			}

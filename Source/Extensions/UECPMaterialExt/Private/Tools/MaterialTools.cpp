@@ -764,19 +764,19 @@ void HandleGetMaterialSummary(const FString& MaterialPath, FString& OutJsonStrin
 		Res->SetNumberField(TEXT("opacity_mask_clip_value"), BaseMat->GetOpacityMaskClipValue());
 
 		TArray<TSharedPtr<FJsonValue>> UsageFlags;
-		if (BaseMat->bUsedWithSkeletalMesh)         UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("SkeletalMesh"))));
-		if (BaseMat->bUsedWithParticleSprites)      UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("ParticleSprites"))));
-		if (BaseMat->bUsedWithMeshParticles)        UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("MeshParticles"))));
-		if (BaseMat->bUsedWithNiagaraRibbons)       UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraRibbons"))));
-		if (BaseMat->bUsedWithNiagaraMeshParticles) UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraMeshParticles"))));
-		if (BaseMat->bUsedWithNiagaraSprites)       UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraSprites"))));
-		if (BaseMat->bUsedWithInstancedStaticMeshes)UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("InstancedStaticMeshes"))));
-		if (BaseMat->bUsedWithMorphTargets)         UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("MorphTargets"))));
-		if (BaseMat->bUsedWithClothing)             UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("Clothing"))));
-		if (BaseMat->bUsedWithHairStrands)          UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("HairStrands"))));
-		if (BaseMat->bUsedWithWater)                UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("Water"))));
-		if (BaseMat->bUsedWithNanite)               UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("Nanite"))));
-		if (BaseMat->bUsedWithStaticLighting)       UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("StaticLighting"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_SkeletalMesh))         UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("SkeletalMesh"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_ParticleSprites))      UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("ParticleSprites"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_MeshParticles))        UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("MeshParticles"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_NiagaraRibbons))       UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraRibbons"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_NiagaraMeshParticles)) UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraMeshParticles"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_NiagaraSprites))       UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("NiagaraSprites"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_InstancedStaticMeshes))UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("InstancedStaticMeshes"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_MorphTargets))         UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("MorphTargets"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_Clothing))             UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("Clothing"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_HairStrands))          UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("HairStrands"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_Water))                UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("Water"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_Nanite))               UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("Nanite"))));
+		if (BaseMat->GetUsageByFlag(MATUSAGE_StaticLighting))       UsageFlags.Add(MakeShareable(new FJsonValueString(TEXT("StaticLighting"))));
 		Res->SetArrayField(TEXT("usage_flags"), UsageFlags);
 	}
 

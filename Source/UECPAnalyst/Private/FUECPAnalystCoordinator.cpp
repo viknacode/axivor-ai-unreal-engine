@@ -670,8 +670,8 @@ void FUECPAnalystCoordinator::SendChatRequest()
 
 		TArray<TSharedPtr<FJsonValue>> OpenAiMessages;
 		TSharedPtr<FJsonObject> SystemMessage = MakeShareable(new FJsonObject);
-		SystemMessage->SetStringField("role", "system");
-		SystemMessage->SetStringField("content", FormattingInstruction);
+		SystemMessage->SetStringField(TEXT("role"), "system");
+		SystemMessage->SetStringField(TEXT("content"), FormattingInstruction);
 		OpenAiMessages.Add(MakeShareable(new FJsonValueObject(SystemMessage)));
 
 		FString FileContext;
@@ -693,7 +693,7 @@ void FUECPAnalystCoordinator::SendChatRequest()
 			if (!Msg->TryGetArrayField(TEXT("parts"), PartsArray) || PartsArray->Num() == 0) continue;
 
 			TSharedPtr<FJsonObject> OpenAiMessage = MakeShareable(new FJsonObject);
-			OpenAiMessage->SetStringField("role", (Role == TEXT("model")) ? TEXT("assistant") : Role);
+			OpenAiMessage->SetStringField(TEXT("role"), (Role == TEXT("model")) ? TEXT("assistant") : Role);
 
 			TArray<TSharedPtr<FJsonValue>> ContentArray;
 			for (const TSharedPtr<FJsonValue>& PartValue : *PartsArray)
@@ -810,7 +810,7 @@ void FUECPAnalystCoordinator::SendChatRequest()
 		if (ProviderStr == TEXT("OpenAI"))
 		{
 			HttpRequest->SetURL(FHttpCommunicationManager::BuildOpenAIUrl());
-			JsonPayload->SetStringField("model", FApiKeyManager::Get().GetActiveOpenAIModel());
+			JsonPayload->SetStringField(TEXT("model"), FApiKeyManager::Get().GetActiveOpenAIModel());
 		}
 		else
 		{
@@ -821,8 +821,8 @@ void FUECPAnalystCoordinator::SendChatRequest()
 
 		TArray<TSharedPtr<FJsonValue>> Messages;
 		TSharedPtr<FJsonObject> SystemMessage = MakeShareable(new FJsonObject);
-		SystemMessage->SetStringField("role", "system");
-		SystemMessage->SetStringField("content", FormattingInstruction);
+		SystemMessage->SetStringField(TEXT("role"), "system");
+		SystemMessage->SetStringField(TEXT("content"), FormattingInstruction);
 		Messages.Add(MakeShareable(new FJsonValueObject(SystemMessage)));
 
 		FString FileContext;
@@ -844,7 +844,7 @@ void FUECPAnalystCoordinator::SendChatRequest()
 			if (!Msg->TryGetArrayField(TEXT("parts"), PartsArray) || PartsArray->Num() == 0) continue;
 
 			TSharedPtr<FJsonObject> OutMsg = MakeShareable(new FJsonObject);
-			OutMsg->SetStringField("role", (Role == TEXT("model")) ? TEXT("assistant") : TEXT("user"));
+			OutMsg->SetStringField(TEXT("role"), (Role == TEXT("model")) ? TEXT("assistant") : TEXT("user"));
 
 			TArray<TSharedPtr<FJsonValue>> ContentArray;
 			for (const TSharedPtr<FJsonValue>& PartValue : *PartsArray)
@@ -859,8 +859,8 @@ void FUECPAnalystCoordinator::SendChatRequest()
 						bFileContextAdded = true;
 					}
 					TSharedPtr<FJsonObject> TextPart = MakeShareable(new FJsonObject);
-					TextPart->SetStringField("type", "text");
-					TextPart->SetStringField("text", TextContent);
+					TextPart->SetStringField(TEXT("type"), "text");
+					TextPart->SetStringField(TEXT("text"), TextContent);
 					ContentArray.Add(MakeShareable(new FJsonValueObject(TextPart)));
 				}
 				const TSharedPtr<FJsonObject, ESPMode::ThreadSafe>* InlineData = nullptr;
@@ -869,16 +869,16 @@ void FUECPAnalystCoordinator::SendChatRequest()
 					const FString MimeType = (*InlineData)->GetStringField(TEXT("mime_type"));
 					const FString Data     = (*InlineData)->GetStringField(TEXT("data"));
 					TSharedPtr<FJsonObject> ImagePart = MakeShareable(new FJsonObject);
-					ImagePart->SetStringField("type", "image_url");
+					ImagePart->SetStringField(TEXT("type"), "image_url");
 					TSharedPtr<FJsonObject> ImageUrl = MakeShareable(new FJsonObject);
-					ImageUrl->SetStringField("url", FString::Printf(TEXT("data:%s;base64,%s"), *MimeType, *Data));
-					ImagePart->SetObjectField("image_url", ImageUrl);
+					ImageUrl->SetStringField(TEXT("url"), FString::Printf(TEXT("data:%s;base64,%s"), *MimeType, *Data));
+					ImagePart->SetObjectField(TEXT("image_url"), ImageUrl);
 					ContentArray.Add(MakeShareable(new FJsonValueObject(ImagePart)));
 				}
 			}
 			if (ContentArray.Num() > 0)
 			{
-				OutMsg->SetArrayField("content", ContentArray);
+				OutMsg->SetArrayField(TEXT("content"), ContentArray);
 				Messages.Add(MakeShareable(new FJsonValueObject(OutMsg)));
 			}
 		}
@@ -913,7 +913,7 @@ void FUECPAnalystCoordinator::SendChatRequest()
 			if (!Msg->TryGetArrayField(TEXT("parts"), PartsArray) || PartsArray->Num() == 0) continue;
 
 			TSharedPtr<FJsonObject> ClaudeMessage = MakeShareable(new FJsonObject);
-			ClaudeMessage->SetStringField("role", (Role == TEXT("model")) ? TEXT("assistant") : TEXT("user"));
+			ClaudeMessage->SetStringField(TEXT("role"), (Role == TEXT("model")) ? TEXT("assistant") : TEXT("user"));
 
 			TArray<TSharedPtr<FJsonValue>> ContentArray;
 			for (const TSharedPtr<FJsonValue>& PartValue : *PartsArray)
@@ -928,8 +928,8 @@ void FUECPAnalystCoordinator::SendChatRequest()
 						bFileContextAdded = true;
 					}
 					TSharedPtr<FJsonObject> TextPart = MakeShareable(new FJsonObject);
-					TextPart->SetStringField("type", "text");
-					TextPart->SetStringField("text", TextContent);
+					TextPart->SetStringField(TEXT("type"), "text");
+					TextPart->SetStringField(TEXT("text"), TextContent);
 					ContentArray.Add(MakeShareable(new FJsonValueObject(TextPart)));
 				}
 				const TSharedPtr<FJsonObject, ESPMode::ThreadSafe>* InlineData = nullptr;
@@ -938,18 +938,18 @@ void FUECPAnalystCoordinator::SendChatRequest()
 					const FString MimeType = (*InlineData)->GetStringField(TEXT("mime_type"));
 					const FString Data     = (*InlineData)->GetStringField(TEXT("data"));
 					TSharedPtr<FJsonObject> ImagePart = MakeShareable(new FJsonObject);
-					ImagePart->SetStringField("type", "image");
+					ImagePart->SetStringField(TEXT("type"), "image");
 					TSharedPtr<FJsonObject> ImageSource = MakeShareable(new FJsonObject);
-					ImageSource->SetStringField("type", "base64");
-					ImageSource->SetStringField("media_type", MimeType);
-					ImageSource->SetStringField("data", Data);
-					ImagePart->SetObjectField("source", ImageSource);
+					ImageSource->SetStringField(TEXT("type"), "base64");
+					ImageSource->SetStringField(TEXT("media_type"), MimeType);
+					ImageSource->SetStringField(TEXT("data"), Data);
+					ImagePart->SetObjectField(TEXT("source"), ImageSource);
 					ContentArray.Add(MakeShareable(new FJsonValueObject(ImagePart)));
 				}
 			}
 			if (ContentArray.Num() > 0)
 			{
-				ClaudeMessage->SetArrayField("content", ContentArray);
+				ClaudeMessage->SetArrayField(TEXT("content"), ContentArray);
 				ClaudeMessages.Add(MakeShareable(new FJsonValueObject(ClaudeMessage)));
 			}
 		}

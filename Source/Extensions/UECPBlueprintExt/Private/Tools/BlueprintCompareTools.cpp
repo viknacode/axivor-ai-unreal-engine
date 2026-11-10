@@ -938,7 +938,7 @@ namespace
 		MarkTransient(Snapshot);
 
 		TArray<UObject*> SubObjects;
-		GetObjectsWithOuter(Snapshot, SubObjects, true);
+		GetObjectsWithOuter(Snapshot, SubObjects, EGetObjectsFlags::IncludeNestedObjects);
 		for (UObject* Sub : SubObjects)
 		{
 			if (Sub && Sub->HasAnyFlags(RF_ClassDefaultObject)) continue;
