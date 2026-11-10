@@ -3051,6 +3051,7 @@ void UUECPSettingsBridge::PushACPAuthStatus(const FString& AgentId)
 		Status->State == EUECPACPAuthState::Connected ? TEXT("connected")
 		: Status->State == EUECPACPAuthState::Disconnected ? TEXT("disconnected") : TEXT("unknown"));
 	Root->SetStringField(TEXT("busy"),     Status->BusyOp);
+	Root->SetStringField(TEXT("busyStage"), Status->BusyStage);
 	Root->SetStringField(TEXT("email"),    Status->Email);
 	Root->SetStringField(TEXT("plan"),     Status->Plan);
 	Root->SetStringField(TEXT("error"),    Status->Error);

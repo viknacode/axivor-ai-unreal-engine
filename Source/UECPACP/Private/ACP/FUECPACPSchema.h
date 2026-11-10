@@ -8,6 +8,9 @@
 
 namespace UECPACPSchema
 {
+	// Repairs legacy API-key selection for account-based Antigravity CLI profiles.
+	// With no stored login, leave authentication unset so probing cannot reopen login.
+	bool PrepareAntigravityAccountSettings(const TSharedRef<FJsonObject>& Settings, bool bHasStoredLogin);
 
 	TSharedRef<FJsonObject> BuildInitializeParams(const FString& ClientName,
 		const FString& ClientTitle, const FString& ClientVersion, bool bOfferTerminalAuth = false);

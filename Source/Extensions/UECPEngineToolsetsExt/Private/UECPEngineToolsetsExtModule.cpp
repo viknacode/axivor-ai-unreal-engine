@@ -1,7 +1,7 @@
-// Axivor AI — Unreal 5.8 native Toolset Registry + File Sandbox bridge.
+// Axivor AI — Unreal 5.9 native Toolset Registry + File Sandbox bridge.
 //
 // Exposes, through the normal Axivor tool dispatcher, everything registered in
-// the engine's Toolset Registry (UE 5.8, Experimental). This is the exact tool
+// the engine's Toolset Registry (UE 5.9, Experimental). This is the exact tool
 // layer Epic's built-in "Unreal MCP" server serves over HTTP — here it is called
 // in-process, so it works without starting that server and is gated by the same
 // interaction modes / confirmations as every other Axivor tool.
@@ -21,7 +21,6 @@
 #include "Services/UECPToolSafety.h"
 #include "Managers/SettingsManager.h"
 
-#include "ToolsetRegistry/ToolsetRegistrySubsystem.h"
 #include "ToolsetRegistry/ToolsetRegistry.h"
 #include "ToolsetRegistry/Toolset.h"
 #include "ToolsetRegistry/SandboxLibrary.h"
@@ -88,22 +87,16 @@ namespace
 		return R;
 	}
 
-	static UToolsetRegistrySubsystem* GetRegistry(FString& OutErr)
+	// UE 5.9: the registry is a process-wide singleton (FToolsetRegistry::Get()).
+	// UToolsetRegistrySubsystem moved to ToolsetRegistryEditor and only forwards to it.
+	static FToolsetRegistry* GetRegistry(FString& OutErr)
 	{
-		if (!GEditor)
+		FToolsetRegistry* Reg = FToolsetRegistry::Get();
+		if (!Reg)
 		{
-			OutErr = TEXT("Editor not available.");
-			return nullptr;
+			OutErr = TEXT("Toolset Registry unavailable — enable the 'Toolset Registry' and 'All Toolsets' plugins and restart the editor.");
 		}
-		TValueOrError<TObjectPtr<UToolsetRegistrySubsystem>, FString> R = UToolsetRegistrySubsystem::Get();
-		if (R.HasError())
-		{
-			OutErr = R.GetError().IsEmpty()
-				? TEXT("Toolset Registry subsystem unavailable — enable the 'Toolset Registry' and 'All Toolsets' plugins and restart the editor.")
-				: R.GetError();
-			return nullptr;
-		}
-		return R.GetValue().Get();
+		return Reg;
 	}
 
 	// ── Pending long-running tool calls ─────────────────────────────────────
@@ -138,7 +131,7 @@ namespace
 	static FUECPToolResult HandleListToolsets(const TSharedPtr<FJsonObject>& Args)
 	{
 		FString Err;
-		UToolsetRegistrySubsystem* Sub = GetRegistry(Err);
+		FToolsetRegistry* Sub = GetRegistry(Err);
 		if (!Sub) return Fail(Err);
 
 		const FString Filter = ArgStr(Args, TEXT("filter")).ToLower();
@@ -146,7 +139,7 @@ namespace
 
 		TArray<TSharedPtr<FJsonValue>> Arr;
 		int32 ToolTotal = 0;
-		Sub->ToolsetRegistry.ForEachToolset([&](const FString& Name, const FToolset& T)
+		Sub->ForEachToolset([&](const FString& Name, const FToolset& T)
 		{
 			const FString Desc = T.GetToolsetDescription();
 			if (!Filter.IsEmpty() && !Name.ToLower().Contains(Filter) && !Desc.ToLower().Contains(Filter)) return;
@@ -178,14 +171,14 @@ namespace
 	static FUECPToolResult HandleDescribeToolset(const TSharedPtr<FJsonObject>& Args)
 	{
 		FString Err;
-		UToolsetRegistrySubsystem* Sub = GetRegistry(Err);
+		FToolsetRegistry* Sub = GetRegistry(Err);
 		if (!Sub) return Fail(Err);
 
 		const FString Name = ArgStr(Args, TEXT("toolset"));
 		if (Name.IsEmpty()) return Fail(TEXT("Missing 'toolset'. Use engine_list_toolsets to see the names."));
 
 		FString FindErr;
-		TSharedPtr<FToolset> T = Sub->ToolsetRegistry.Find(Name, false, &FindErr);
+		TSharedPtr<FToolset> T = Sub->Find(Name, false, &FindErr);
 		if (!T.IsValid()) return Fail(FindErr.IsEmpty() ? FString::Printf(TEXT("Toolset '%s' not found."), *Name) : FindErr);
 
 		TSharedRef<FJsonObject> Out = MakeShared<FJsonObject>();
@@ -193,13 +186,12 @@ namespace
 		Out->SetStringField(TEXT("description"), T->GetToolsetDescription());
 		Out->SetBoolField(TEXT("enabled"), T->IsEnabled());
 
-		const FString Schema = T->GetJsonSchema();
-		TSharedPtr<FJsonValue> Parsed;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Schema);
-		if (FJsonSerializer::Deserialize(Reader, Parsed) && Parsed.IsValid())
-			Out->SetField(TEXT("schema"), Parsed);
+		// UE 5.9: schemas are already-parsed FToolsetJsonSchema values.
+		const FToolsetJsonSchema Schema = T->GetJsonSchema();
+		if (const TSharedPtr<FJsonObject>& SchemaObj = Schema.GetJsonObject(); SchemaObj.IsValid())
+			Out->SetObjectField(TEXT("schema"), SchemaObj);
 		else
-			Out->SetStringField(TEXT("schema"), Schema);
+			Out->SetStringField(TEXT("schema"), TEXT("{}"));
 		Out->SetStringField(TEXT("hint"), TEXT("Tool names are '<Toolset>.<Tool>'. Pass parameters as the 'input' object of engine_call_tool."));
 		return Ok(Out);
 	}
@@ -207,7 +199,7 @@ namespace
 	static FUECPToolResult HandleCallTool(const TSharedPtr<FJsonObject>& Args)
 	{
 		FString Err;
-		UToolsetRegistrySubsystem* Sub = GetRegistry(Err);
+		FToolsetRegistry* Sub = GetRegistry(Err);
 		if (!Sub) return Fail(Err);
 
 		FString Toolset = ArgStr(Args, TEXT("toolset"));
@@ -242,7 +234,7 @@ namespace
 		Desc.ToolName    = Tool;
 
 		const double T0 = FPlatformTime::Seconds();
-		TFuture<TValueOrError<FString, FString>> Future = Sub->ToolsetRegistry.ExecuteTool(Desc, JsonInput);
+		TFuture<TValueOrError<FString, FString>> Future = Sub->ExecuteTool(Desc, JsonInput);
 
 		// Most toolset calls complete synchronously on the game thread. Give async
 		// ones a short grace period, then hand back a job id to poll.
@@ -431,7 +423,7 @@ void FUECPEngineToolsetsExtModule::StartupModule()
 		const FName U(TEXT("engine"));
 		const auto Meta = [&D, &U](const TCHAR* Action, const TCHAR* Summary, const TCHAR* Params)
 		{ D.RegisterToolMetadata({ FName(Action), U, FString(Summary), FString(Params) }); };
-		Meta(TEXT("engine_list_toolsets"),    TEXT("List every UE 5.8 native toolset (scene, actor, material, editor, UMG, PCG, Niagara, GAS, physics, Slate, tests, plugins, config, skills...) with their tool names."), TEXT("filter?, include_tools?=true"));
+		Meta(TEXT("engine_list_toolsets"),    TEXT("List every UE 5.9 native toolset (blueprints, console, perf, navmesh, files, scene, actor, material, editor, UMG, PCG, Niagara, GAS, physics, Slate, tests, plugins, config, skills...) with their tool names."), TEXT("filter?, include_tools?=true"));
 		Meta(TEXT("engine_describe_toolset"), TEXT("JSON schema (parameters + descriptions) of all tools in one native toolset."), TEXT("toolset"));
 		Meta(TEXT("engine_call_tool"),        TEXT("Execute a native toolset tool in-process: '<Toolset>.<Tool>' with a JSON input object. Returns the tool result, or a job_id when long-running."), TEXT("toolset, tool | name='Toolset.Tool', input{}, wait_ms?=3000"));
 		Meta(TEXT("engine_call_tool_result"), TEXT("Poll a long-running native tool call."), TEXT("job_id"));

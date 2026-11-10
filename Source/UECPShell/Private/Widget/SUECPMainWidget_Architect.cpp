@@ -305,7 +305,7 @@ void SUECPMainWidget::LoadAndAttachImage(const FString& ImagePath, TArray<FAttac
 	const int64 MaxImageSize = 20 * 1024 * 1024;
 	if (FileData.Num() > MaxImageSize)
 	{
-		UE_LOG(LogUECPShell, Warning, TEXT("Image file too large: %s (%d bytes, max is %d bytes)"), *ImagePath, FileData.Num(), MaxImageSize);
+		UE_LOG(LogUECPShell, Warning, TEXT("Image file too large: %s (%d bytes, max is %lld bytes)"), *ImagePath, FileData.Num(), MaxImageSize);
 		return;
 	}
 
@@ -423,7 +423,7 @@ bool SUECPMainWidget::TryPasteImageFromClipboard(TArray<FAttachedImage>& Attachm
 		}
 
 		FAttachedImage NewImage;
-		NewImage.Name = FString::Printf(TEXT("Clipboard_%d"), FDateTime::Now().GetTicks());
+		NewImage.Name = FString::Printf(TEXT("Clipboard_%lld"), FDateTime::Now().GetTicks());
 		NewImage.MimeType = TEXT("image/png");
 		NewImage.Base64Data = FBase64::Encode(PNGData);
 		Attachments.Add(NewImage);
@@ -479,7 +479,7 @@ bool SUECPMainWidget::TryPasteImageFromClipboard(TArray<FAttachedImage>& Attachm
 	}
 
 	FAttachedImage NewImage;
-	NewImage.Name = FString::Printf(TEXT("Clipboard_%d"), FDateTime::Now().GetTicks());
+	NewImage.Name = FString::Printf(TEXT("Clipboard_%lld"), FDateTime::Now().GetTicks());
 	NewImage.MimeType = MimeType;
 	NewImage.Base64Data = FBase64::Encode(ImageBytes);
 	Attachments.Add(NewImage);
@@ -2361,6 +2361,32 @@ static bool ArchitectToolHeaderHidden(const TSet<FString>& Hidden, const FString
 	return !Action.IsEmpty() && Hidden.Contains(Action);
 }
 
+
+// Parses a "[TOOL_RESULT:<name>:<status>]" header. Names coming from external (ACP) agents can
+// contain ':' and ']' — e.g. a shell tool titled with its command line, robocopy "D:\..." /MT:16 —
+// so the header ends at the LAST ']' of the first line and the status is what follows the LAST ':'.
+// Splitting at the first ':' used to read such successful calls as failures with a mangled title.
+static bool ParseToolResultHeader(const FString& Content, FString& OutName, FString& OutStatus, int32* OutBodyStart = nullptr)
+{
+	static const int32 PrefixLen = 13; // "[TOOL_RESULT:"
+	if (!Content.StartsWith(TEXT("[TOOL_RESULT:"))) return false;
+	int32 LineEnd = Content.Find(TEXT("\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, PrefixLen);
+	if (LineEnd == INDEX_NONE) LineEnd = Content.Len();
+	int32 End = INDEX_NONE;
+	for (int32 i = LineEnd - 1; i >= PrefixLen; --i)
+	{
+		if (Content[i] == TEXT(']')) { End = i; break; }
+	}
+	if (End == INDEX_NONE) return false;
+	const FString Header = Content.Mid(PrefixLen, End - PrefixLen);
+	int32 Colon = INDEX_NONE;
+	if (!Header.FindLastChar(TEXT(':'), Colon)) return false;
+	OutName   = Header.Left(Colon);
+	OutStatus = Header.Mid(Colon + 1);
+	if (OutBodyStart) *OutBodyStart = End + 1;
+	return true;
+}
+
 static bool IsArchitectToolResultMessage(const TSharedPtr<FJsonObject>& MessageObject)
 {
 	if (!MessageObject.IsValid()) return false;
@@ -2374,12 +2400,8 @@ static bool IsArchitectToolResultMessage(const TSharedPtr<FJsonObject>& MessageO
 	FString Content;
 	if (!Part0->TryGetStringField(TEXT("text"), Content)) return false;
 
-	if (!Content.StartsWith(TEXT("[TOOL_RESULT:"))) return false;
-
-	FString Header = Content.Mid(13);
-	int32 ColonIdx;
-	if (!Header.FindChar(TEXT(':'), ColonIdx)) return false;
-	const FString Name = Header.Left(ColonIdx);
+	FString Name, Status;
+	if (!ParseToolResultHeader(Content, Name, Status)) return false;
 	return !ArchitectToolHeaderHidden(GetHiddenToolResultNames(), Name);
 }
 
@@ -2404,10 +2426,9 @@ static bool IsArchitectBatchTransparentMessage(const TSharedPtr<FJsonObject>& Me
 
 	if (Role == TEXT("user") && Content.StartsWith(TEXT("[TOOL_RESULT:")))
 	{
-		FString Header = Content.Mid(13);
-		int32 ColonIdx;
-		if (Header.FindChar(TEXT(':'), ColonIdx))
-			return ArchitectToolHeaderHidden(GetHiddenToolResultNames(), Header.Left(ColonIdx));
+		FString Name, Status;
+		if (ParseToolResultHeader(Content, Name, Status))
+			return ArchitectToolHeaderHidden(GetHiddenToolResultNames(), Name);
 	}
 
 	return false;
@@ -2498,15 +2519,11 @@ static void ComputeArchitectRenderRanges(
 static FString BuildArchitectBatchedRowHtml(const FString& Content)
 {
 	if (!Content.StartsWith(TEXT("[TOOL_RESULT:"))) return FString();
-	FString Header = Content.Mid(13);
-	int32 ColonIdx, EndIdx;
-	if (!Header.FindChar(TEXT(':'), ColonIdx)) return FString();
-	if (!Header.FindChar(TEXT(']'), EndIdx) || EndIdx <= ColonIdx) return FString();
-
-	const FString ToolName  = Header.Left(ColonIdx);
-	const FString Status    = Header.Mid(ColonIdx + 1, EndIdx - ColonIdx - 1);
+	FString ToolName, Status;
+	int32 BodyStart = 0;
+	if (!ParseToolResultHeader(Content, ToolName, Status, &BodyStart)) return FString();
 	const bool bSuccess     = Status == TEXT("success");
-	FString Body            = Content.Mid(Content.Find(TEXT("]")) + 1).TrimStart();
+	FString Body            = Content.Mid(BodyStart).TrimStart();
 
 	FString CallContent;
 	FString ResultContent;
@@ -2591,15 +2608,10 @@ static FString RenderArchitectBatchedToolResultsHtml(
 		FString Content;
 		if (!P->TryGetStringField(TEXT("text"), Content)) continue;
 		if (!Content.StartsWith(TEXT("[TOOL_RESULT:"))) continue;
-		FString Hdr = Content.Mid(13);
-		int32 Cidx; if (!Hdr.FindChar(TEXT(':'), Cidx)) continue;
-		FString Name = Hdr.Left(Cidx);
+		FString Name, Status;
+		if (!ParseToolResultHeader(Content, Name, Status)) continue;
 		if (ArchitectToolHeaderHidden(GetHiddenToolResultNames(), Name)) continue;
-		int32 Eidx; if (Hdr.FindChar(TEXT(']'), Eidx) && Eidx > Cidx)
-		{
-			const FString Status = Hdr.Mid(Cidx + 1, Eidx - Cidx - 1);
-			if (Status == TEXT("success")) OkCount++; else FailCount++;
-		}
+		if (Status == TEXT("success")) OkCount++; else FailCount++;
 		InnerHtml += BuildArchitectBatchedRowHtml(Content);
 	}
 
@@ -3114,9 +3126,8 @@ FString SUECPMainWidget::RenderSingleArchitectMessageHtml(const TSharedPtr<FJson
 			};
 			if (Content.StartsWith(TEXT("[TOOL_RESULT:")))
 			{
-				FString ToolResultInfo = Content.Mid(13);
-				int32 HiddenColon = ToolResultInfo.Find(TEXT(":"));
-				FString HiddenToolName = (HiddenColon != INDEX_NONE) ? ToolResultInfo.Left(HiddenColon) : ToolResultInfo;
+				FString HiddenToolName, HiddenStatus;
+				ParseToolResultHeader(Content, HiddenToolName, HiddenStatus);
 				if (ArchitectToolHeaderHidden(HiddenToolResults, HiddenToolName))
 					return FString();
 			}
@@ -3135,17 +3146,13 @@ FString SUECPMainWidget::RenderSingleArchitectMessageHtml(const TSharedPtr<FJson
 					if (ToolStart == INDEX_NONE) break;
 					int32 NextStart = BatchBody.Find(TEXT("[TOOL_RESULT:"), ESearchCase::CaseSensitive, ESearchDir::FromStart, ToolStart + 13);
 					FString SingleResult = (NextStart != INDEX_NONE) ? BatchBody.Mid(ToolStart, NextStart - ToolStart).TrimEnd() : BatchBody.Mid(ToolStart).TrimEnd();
-					FString TR = SingleResult;
-					TR.RemoveFromStart(TEXT("[TOOL_RESULT:"));
-					int32 SIdx = TR.Find(TEXT(":"));
-					int32 EIdx = TR.Find(TEXT("]"));
-					if (SIdx != INDEX_NONE && EIdx != INDEX_NONE)
+					FString TN, TS;
+					int32 TBodyStart = 0;
+					if (ParseToolResultHeader(SingleResult, TN, TS, &TBodyStart))
 					{
-						FString TN = TR.Left(SIdx);
 						if (!ArchitectToolHeaderHidden(HiddenToolResults, TN))
 						{
-							FString TS = TR.Mid(SIdx + 1, EIdx - SIdx - 1);
-							FString TC = SingleResult.Mid(SingleResult.Find(TEXT("]")) + 1).TrimStart();
+							FString TC = SingleResult.Mid(TBodyStart).TrimStart();
 							TC.ReplaceInline(TEXT("```json\n"), TEXT(""));
 							TC.ReplaceInline(TEXT("```json"), TEXT(""));
 							TC.ReplaceInline(TEXT("\n```"), TEXT(""));
@@ -3210,13 +3217,14 @@ FString SUECPMainWidget::RenderSingleArchitectMessageHtml(const TSharedPtr<FJson
 			}
 			else
 			{
-				FString ToolInfo = Content;
-				ToolInfo.RemoveFromStart(TEXT("[TOOL_RESULT:"));
-				int32 StatusIndex = ToolInfo.Find(TEXT(":"));
-				int32 EndIndex = ToolInfo.Find(TEXT("]"));
-				FString ToolResultName = ToolInfo.Left(StatusIndex);
-				FString Status = ToolInfo.Mid(StatusIndex + 1, EndIndex - StatusIndex - 1);
-				FString FullBody = Content.Mid(Content.Find(TEXT("]")) + 1).TrimStart();
+				FString ToolResultName, Status;
+				int32 BodyStart = 0;
+				if (!ParseToolResultHeader(Content, ToolResultName, Status, &BodyStart))
+				{
+					ToolResultName = TEXT("tool");
+					BodyStart = Content.Find(TEXT("]")) + 1;
+				}
+				FString FullBody = Content.Mid(BodyStart).TrimStart();
 				bool bIsSuccess = Status == TEXT("success");
 				FString IconClass = bIsSuccess ? TEXT("success") : TEXT("error");
 				FString IconSymbol = bIsSuccess ? TEXT("&#10003;") : TEXT("&#10007;");

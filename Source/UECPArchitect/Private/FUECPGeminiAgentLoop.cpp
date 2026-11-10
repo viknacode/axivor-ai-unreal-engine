@@ -334,6 +334,7 @@ void FUECPGeminiAgentLoop::Start()
 void FUECPGeminiAgentLoop::SendRound()
 {
 	check(IsInGameThread());
+	EndRoundTelemetry();
 
 	if (bStopped || Round >= MaxRounds)
 	{
@@ -376,6 +377,7 @@ void FUECPGeminiAgentLoop::SendRound()
 		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Body);
 	FJsonSerializer::Serialize(Payload, Writer);
 	Writer->Close();
+	BeginRoundTelemetry(TEXT("Gemini"), Body.Len());
 
 	ActiveRequest = FHttpModule::Get().CreateRequest();
 	ActiveRequest->SetVerb(TEXT("POST"));
@@ -454,8 +456,11 @@ void FUECPGeminiAgentLoop::ProcessSseData(const FString& DataJson)
 		int32 Prompt = 0, Candidates = 0;
 		(*UsageMeta)->TryGetNumberField(TEXT("promptTokenCount"), Prompt);
 		(*UsageMeta)->TryGetNumberField(TEXT("candidatesTokenCount"), Candidates);
+		(*UsageMeta)->TryGetNumberField(TEXT("cachedContentTokenCount"), RoundCachedTokens);
+		(*UsageMeta)->TryGetNumberField(TEXT("thoughtsTokenCount"), RoundThinkingTokens);
 		if (Prompt > 0)     FinalInputTokens  = Prompt;
-		if (Candidates > 0) FinalOutputTokens = Candidates;
+		// Thinking is billed as output but reported apart from candidatesTokenCount.
+		if (Candidates + RoundThinkingTokens > 0) FinalOutputTokens = Candidates + RoundThinkingTokens;
 	}
 
 	const TArray<TSharedPtr<FJsonValue>>* CandidatesArr = nullptr;
@@ -587,6 +592,7 @@ void FUECPGeminiAgentLoop::OnRequestComplete(FHttpRequestPtr, FHttpResponsePtr R
 void FUECPGeminiAgentLoop::DispatchToolsAndLoop()
 {
 	check(IsInGameThread());
+	EndRoundTelemetry();
 
 	for (const FGeminiToolCall& TC : PendingToolCalls)
 	{

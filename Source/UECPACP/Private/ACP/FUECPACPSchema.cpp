@@ -4,6 +4,28 @@
 
 namespace UECPACPSchema
 {
+	bool PrepareAntigravityAccountSettings(const TSharedRef<FJsonObject>& Settings, bool bHasStoredLogin)
+	{
+		const TSharedPtr<FJsonObject>* ExistingAuth = nullptr;
+		FString AuthType;
+		if (Settings->TryGetObjectField(TEXT("auth"), ExistingAuth) && ExistingAuth)
+			(*ExistingAuth)->TryGetStringField(TEXT("type"), AuthType);
+
+		if (!bHasStoredLogin)
+		{
+			if (AuthType != TEXT("gemini-api-key") && AuthType != TEXT("oauth-personal")) return false;
+			Settings->RemoveField(TEXT("auth"));
+			return true;
+		}
+		if (AuthType == TEXT("oauth-personal")) return false;
+
+		const TSharedRef<FJsonObject> Auth = MakeShared<FJsonObject>();
+		if (ExistingAuth) Auth->Values = (*ExistingAuth)->Values;
+		Auth->SetStringField(TEXT("type"), TEXT("oauth-personal"));
+		Settings->SetObjectField(TEXT("auth"), Auth);
+		return true;
+	}
+
 	TSharedRef<FJsonObject> BuildInitializeParams(const FString& ClientName,
 		const FString& ClientTitle, const FString& ClientVersion, bool bOfferTerminalAuth)
 	{

@@ -910,7 +910,7 @@ static bool OuterMatchesEmitter(UObject* Obj, const FString& EmitterName)
 static TArray<UNiagaraRendererProperties*> CollectRenderers(UNiagaraSystem* System, const FString& EmitterName)
 {
 	TArray<UObject*> SubObjects;
-	GetObjectsWithOuter(System->GetOutermost(), SubObjects, true);
+	GetObjectsWithOuter(System->GetOutermost(), SubObjects, EGetObjectsFlags::IncludeNestedObjects);
 	TArray<UNiagaraRendererProperties*> Result;
 	for (UObject* Obj : SubObjects)
 	{
@@ -926,7 +926,7 @@ static TArray<UNiagaraRendererProperties*> CollectRenderers(UNiagaraSystem* Syst
 static TArray<UObject*> CollectStatelessModules(UNiagaraSystem* System, const FString& EmitterName)
 {
 	TArray<UObject*> SubObjects;
-	GetObjectsWithOuter(System->GetOutermost(), SubObjects, true);
+	GetObjectsWithOuter(System->GetOutermost(), SubObjects, EGetObjectsFlags::IncludeNestedObjects);
 	TArray<UObject*> Result;
 	for (UObject* Obj : SubObjects)
 	{
@@ -1164,19 +1164,19 @@ void HandleSetNiagaraRendererMaterial(const FString& SystemPath, const FString& 
 	FString UsageFlagAutoSet;
 	if (BaseMat && (bIsSprite || bIsMesh || bIsRibbon))
 	{
-		if (bIsSprite && !BaseMat->bUsedWithNiagaraSprites)
+		if (bIsSprite && !BaseMat->GetUsageByFlag(MATUSAGE_NiagaraSprites))
 		{
-			BaseMat->bUsedWithNiagaraSprites = true;
+			BaseMat->SetUsageByFlag(MATUSAGE_NiagaraSprites, true);
 			UsageFlagAutoSet = TEXT("NiagaraSprites");
 		}
-		else if (bIsMesh && !BaseMat->bUsedWithNiagaraMeshParticles)
+		else if (bIsMesh && !BaseMat->GetUsageByFlag(MATUSAGE_NiagaraMeshParticles))
 		{
-			BaseMat->bUsedWithNiagaraMeshParticles = true;
+			BaseMat->SetUsageByFlag(MATUSAGE_NiagaraMeshParticles, true);
 			UsageFlagAutoSet = TEXT("NiagaraMeshParticles");
 		}
-		else if (bIsRibbon && !BaseMat->bUsedWithNiagaraRibbons)
+		else if (bIsRibbon && !BaseMat->GetUsageByFlag(MATUSAGE_NiagaraRibbons))
 		{
-			BaseMat->bUsedWithNiagaraRibbons = true;
+			BaseMat->SetUsageByFlag(MATUSAGE_NiagaraRibbons, true);
 			UsageFlagAutoSet = TEXT("NiagaraRibbons");
 		}
 
@@ -1821,9 +1821,9 @@ void HandleSetMeshRendererMesh(const FString& SystemPath, const FString& Emitter
 
 		if (UMaterial* BaseMat = Material->GetMaterial())
 		{
-			if (!BaseMat->bUsedWithNiagaraMeshParticles)
+			if (!BaseMat->GetUsageByFlag(MATUSAGE_NiagaraMeshParticles))
 			{
-				BaseMat->bUsedWithNiagaraMeshParticles = true;
+				BaseMat->SetUsageByFlag(MATUSAGE_NiagaraMeshParticles, true);
 				BaseMat->MarkPackageDirty();
 				BaseMat->PostEditChange();
 				UsageFlagAutoSet = TEXT("NiagaraMeshParticles");
@@ -3753,7 +3753,7 @@ void HandleRemoveNiagaraModule(const FString& SystemPath, const FString& Emitter
 				if (Elem == FoundModule)
 				{
 					Helper.RemoveValues(i, 1);
-					FoundModule->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_ForceNoResetLoaders);
+					FoundModule->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors);
 					bRemoved = true;
 					break;
 				}
@@ -3764,7 +3764,7 @@ void HandleRemoveNiagaraModule(const FString& SystemPath, const FString& Emitter
 
 	if (!bRemoved)
 	{
-		FoundModule->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_ForceNoResetLoaders);
+		FoundModule->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors);
 	}
 
 	RebuildStatelessEmitterCache(System);
@@ -3999,7 +3999,7 @@ void HandleAddRendererToEmitter(const FString& SystemPath, const FString& Emitte
 	if (!EmitterObj)
 	{
 		TArray<UObject*> SubObjs;
-		GetObjectsWithOuter(System->GetOutermost(), SubObjs, true);
+		GetObjectsWithOuter(System->GetOutermost(), SubObjs, EGetObjectsFlags::IncludeNestedObjects);
 		for (UObject* Obj : SubObjs)
 		{
 			if (Obj->GetClass()->GetName().Contains(TEXT("StatelessEmitter")))
@@ -5052,7 +5052,7 @@ void HandleSetNiagaraDataInterface(const FString& SystemPath, const FString& Emi
 	if (!System) { SetError(FString::Printf(TEXT("Could not load NiagaraSystem: %s"), *SystemPath), OutJsonString, OutError); return; }
 
 	TArray<UObject*> SubObjects;
-	GetObjectsWithOuter(System->GetOutermost(), SubObjects, true);
+	GetObjectsWithOuter(System->GetOutermost(), SubObjects, EGetObjectsFlags::IncludeNestedObjects);
 
 	auto StripDIPrefix = [](const FString& In) -> FString
 	{

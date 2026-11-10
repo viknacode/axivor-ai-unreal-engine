@@ -344,6 +344,7 @@ FString FUECPOpenAIAgentLoop::ChooseTaskTier() const
 void FUECPOpenAIAgentLoop::SendRound()
 {
 	check(IsInGameThread());
+	EndRoundTelemetry();
 
 	if (bStopped || Round >= MaxRounds)
 	{
@@ -389,29 +390,91 @@ void FUECPOpenAIAgentLoop::SendRound()
 	TSharedRef<FJsonObject> StreamOptions = MakeShared<FJsonObject>();
 	StreamOptions->SetBoolField(TEXT("include_usage"), true);
 
-	const FString ModelLower = ModelName.ToLower();
+	FString CleanModelName = ModelName.TrimStartAndEnd();
+	if (CleanModelName.Equals(TEXT("gpt-6 astra"), ESearchCase::IgnoreCase))
+	{
+		CleanModelName = TEXT("gpt-6-astra");
+	}
+	else if (CleanModelName.Contains(TEXT(" ")))
+	{
+		CleanModelName = CleanModelName.Replace(TEXT(" "), TEXT("-"));
+	}
+
+	const FString ModelLower = CleanModelName.ToLower();
 	const bool bUsesCompletionTokens =
+		ModelLower.StartsWith(TEXT("gpt-6"))  ||
 		ModelLower.StartsWith(TEXT("gpt-5"))  ||
 		ModelLower.StartsWith(TEXT("o1"))     ||
+		ModelLower.StartsWith(TEXT("o2"))     ||
 		ModelLower.StartsWith(TEXT("o3"))     ||
 		ModelLower.StartsWith(TEXT("o4"))     ||
-		ModelLower.StartsWith(TEXT("o-"));
+		ModelLower.StartsWith(TEXT("o-"))     ||
+		ModelLower.Contains(TEXT("astra"))    ||
+		ModelLower.Contains(TEXT("gpt-4o"))   ||
+		ModelLower.Contains(TEXT("gpt-4.1"))  ||
+		(!ModelLower.StartsWith(TEXT("gpt-3")) && !ModelLower.Equals(TEXT("gpt-4")));
 	const FString TokensKey = bUsesCompletionTokens
 		? TEXT("max_completion_tokens") : TEXT("max_tokens");
 
 	TSharedRef<FJsonObject> Payload = MakeShared<FJsonObject>();
-	Payload->SetStringField(TEXT("model"), ModelName);
+	Payload->SetStringField(TEXT("model"), CleanModelName);
 	Payload->SetNumberField(TokensKey, ResolveMaxOutputTokens());
 	Payload->SetBoolField(TEXT("stream"), true);
 	Payload->SetObjectField(TEXT("stream_options"), StreamOptions);
 	Payload->SetArrayField(TEXT("tools"), BuildToolDefinitions());
 	Payload->SetArrayField(TEXT("messages"), Messages);
 
+	const bool bIsReasoningModel =
+		ModelLower.StartsWith(TEXT("gpt-6"))  ||
+		ModelLower.StartsWith(TEXT("gpt-5.5"))||
+		ModelLower.Contains(TEXT("astra"))    ||
+		ModelLower.StartsWith(TEXT("o1"))     ||
+		ModelLower.StartsWith(TEXT("o2"))     ||
+		ModelLower.StartsWith(TEXT("o3"))     ||
+		ModelLower.StartsWith(TEXT("o4"));
+
+	// OpenAI requirement for /v1/chat/completions:
+	// When using function tools with reasoning-capable models (e.g. gpt-6-astra, gpt-5.5),
+	// /v1/chat/completions throws HTTP 400 invalid_request_error:
+	// "Function tools with reasoning_effort are not supported for <model> in /v1/chat/completions.
+	// To use function tools, use /v1/responses or set reasoning_effort to 'none'."
+	// Explicitly setting reasoning_effort: "none" enables tool calls in /v1/chat/completions.
+	if (bIsReasoningModel && EndpointURL.Contains(TEXT("/chat/completions")))
+	{
+		Payload->SetStringField(TEXT("reasoning_effort"), TEXT("none"));
+	}
+
+	if (!CustomParams.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> CustomObj;
+		TSharedRef<TJsonReader<>> CustomReader = TJsonReaderFactory<>::Create(CustomParams);
+		if (FJsonSerializer::Deserialize(CustomReader, CustomObj) && CustomObj.IsValid())
+		{
+			for (const auto& Pair : CustomObj->Values)
+			{
+				FString Key = FString(*Pair.Key);
+				if (bUsesCompletionTokens && Key.Equals(TEXT("max_tokens"), ESearchCase::IgnoreCase))
+				{
+					Key = TEXT("max_completion_tokens");
+				}
+				// Strip temperature for o-series reasoning models since OpenAI rejects it
+				if ((ModelLower.StartsWith(TEXT("o1")) || ModelLower.StartsWith(TEXT("o2")) ||
+					 ModelLower.StartsWith(TEXT("o3")) || ModelLower.StartsWith(TEXT("o4"))) &&
+					Key.Equals(TEXT("temperature"), ESearchCase::IgnoreCase))
+				{
+					continue;
+				}
+				Payload->SetField(Key, Pair.Value);
+			}
+		}
+	}
+
 	FString Body;
 	TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
 		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Body);
 	FJsonSerializer::Serialize(Payload, Writer);
 	Writer->Close();
+	BeginRoundTelemetry(TEXT("OpenAI-compatible"), Body.Len());
 
 	ActiveRequest = FHttpModule::Get().CreateRequest();
 	ActiveRequest->SetVerb(TEXT("POST"));
@@ -502,6 +565,12 @@ void FUECPOpenAIAgentLoop::ProcessSseData(const FString& DataJson)
 		(*UsagePtr)->TryGetNumberField(TEXT("completion_tokens"), Completion);
 		if (Prompt > 0)     FinalInputTokens  = Prompt;
 		if (Completion > 0) FinalOutputTokens = Completion;
+
+		const TSharedPtr<FJsonObject>* DetailsPtr = nullptr;
+		if ((*UsagePtr)->TryGetObjectField(TEXT("prompt_tokens_details"), DetailsPtr) && DetailsPtr)
+			(*DetailsPtr)->TryGetNumberField(TEXT("cached_tokens"), RoundCachedTokens);
+		if ((*UsagePtr)->TryGetObjectField(TEXT("completion_tokens_details"), DetailsPtr) && DetailsPtr)
+			(*DetailsPtr)->TryGetNumberField(TEXT("reasoning_tokens"), RoundThinkingTokens);
 	}
 
 	const TArray<TSharedPtr<FJsonValue>>* Choices = nullptr;
@@ -713,6 +782,7 @@ void FUECPOpenAIAgentLoop::OnRequestComplete(FHttpRequestPtr, FHttpResponsePtr R
 void FUECPOpenAIAgentLoop::DispatchToolsAndLoop()
 {
 	check(IsInGameThread());
+	EndRoundTelemetry();
 
 	TArray<int32> Indices;
 	PendingToolCalls.GetKeys(Indices);

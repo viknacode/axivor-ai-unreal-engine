@@ -4,6 +4,9 @@ Intermediate/
 Saved/
 DerivedDataCache/
 
+# ACP agents fetched by Scripts/Fetch-ACPAgents.ps1 — several GB, third-party licenses
+/ThirdParty/ACPAgents/
+
 # Local scratch
 *.log
 *.tmp
@@ -16,3 +19,7 @@ DerivedDataCache/
 # Never commit local credentials or session state
 **/settings.ini
 **/session_token.txt
+
+# Electronic Nodes (Hugo Attal, All Rights Reserved) — local merge, never publish
+/Source/ElectronicNodes/
+/UpdateConfig.ini

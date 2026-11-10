@@ -1012,8 +1012,13 @@ function _icon(id, size) {
             <button class="pw-show" onclick="togglePw('api-key',this)">Show</button>
           </div>
 
-          <label class="field-label" data-i18n="s_custom_params">Custom Request Params (JSON)</label>
-          <textarea id="custom-params" placeholder='{"temperature":0.7,"max_completion_tokens":16384}' oninput="slotDirty()"></textarea>
+          <div class="hint" style="margin:12px 0">Basta escolher o modelo e colar sua chave de API. Os parâmetros necessários são configurados automaticamente.</div>
+          <details id="api-advanced">
+            <summary style="cursor:pointer">Opções avançadas (opcional)</summary>
+            <label class="field-label">Parâmetros extras (JSON, opcional)</label>
+            <textarea id="custom-params" placeholder='Deixe vazio para usar os padrões automáticos' oninput="slotDirty()"></textarea>
+            <div class="hint">Não precisa preencher. Este campo serve apenas para personalizar parâmetros da API.</div>
+          </details>
         </div>
       </div>
 
@@ -1672,7 +1677,7 @@ function _icon(id, size) {
     </div><!-- /sec-sc -->
 
     <div class="section" id="sec-info">
-      <div class="ax-about"><svg class="" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="axg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent)"/></linearGradient></defs><path d="M21 78 L49 22 M79 78 L51 22" stroke="url(#axg2)" stroke-width="15" stroke-linecap="round" fill="none"/><path d="M22 74 A36 36 0 0 0 78 74" stroke="url(#axg2)" stroke-width="6.5" stroke-linecap="round" fill="none"/><circle cx="50" cy="60" r="6" fill="#fff"/></svg><div><div class="n">Axivor <b>AI</b></div><div class="s">Copiloto de engenharia para Unreal Engine 5.8. Architect, Project Scanner, Crew multi-agente, ferramentas de geração e um servidor MCP integrados ao editor.</div><div class="chips"><span class="ax-chip"><span class="dot"></span>Unreal Engine 5.8</span><span class="ax-chip"><span class="dot"></span>Editor plugin</span><span class="ax-chip"><span class="dot"></span>MCP ready</span></div></div></div>
+      <div class="ax-about"><svg class="" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="axg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent)"/></linearGradient></defs><path d="M21 78 L49 22 M79 78 L51 22" stroke="url(#axg2)" stroke-width="15" stroke-linecap="round" fill="none"/><path d="M22 74 A36 36 0 0 0 78 74" stroke="url(#axg2)" stroke-width="6.5" stroke-linecap="round" fill="none"/><circle cx="50" cy="60" r="6" fill="#fff"/></svg><div><div class="n">Axivor <b>AI</b></div><div class="s">Copiloto de engenharia para Unreal Engine 5.9. Architect, Project Scanner, Crew multi-agente, ferramentas de geração e um servidor MCP integrados ao editor.</div><div class="chips"><span class="ax-chip"><span class="dot"></span>Unreal Engine 5.9</span><span class="ax-chip"><span class="dot"></span>Editor plugin</span><span class="ax-chip"><span class="dot"></span>MCP ready</span></div></div></div>
       <div class="card">
         <div class="card-label" data-i18n="s_info_plugin_label">Plugin</div>
         <div id="info-plugin-name" style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:2px">—</div>
@@ -1711,12 +1716,12 @@ function _icon(id, size) {
         <div class="card-label">Modo Turbo</div>
         <div class="ax-turbo-hero">
           <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
-          <div><div class="t">Autonomia total no projeto</div><div class="d">A IA executa sem pedir confirmação: operações destrutivas, edições de agentes CLI, servidores MCP externos e todos os toolsets nativos do UE 5.8 (cena, atores, materiais, UMG, PCG, Niagara, GAS, física, testes, plugins, config…).</div></div>
+          <div><div class="t">Autonomia total no projeto</div><div class="d">A IA executa sem pedir confirmação: operações destrutivas, edições de agentes CLI, servidores MCP externos e todos os toolsets nativos do UE 5.9 (cena, atores, materiais, UMG, PCG, Niagara, GAS, física, testes, plugins, config…).</div></div>
         </div>
         <div class="ax-turbo-list">
           <div>Sem confirmação para delete / clear / move</div>
           <div>Agentes (Claude Code, Codex…) em modo bypass</div>
-          <div>Toolsets nativos do UE 5.8 liberados (umbrella <b>engine</b>)</div>
+          <div>Toolsets nativos do UE 5.9 liberados (umbrella <b>engine</b>)</div>
           <div>Ferramentas MCP externas sem prompt</div>
         </div>
         <div class="toggle-row">
@@ -1724,7 +1729,7 @@ function _icon(id, size) {
           <div class="tgl" id="tgl-turbo-mode" onclick="toggleToolSetting('tgl-turbo-mode')"></div>
         </div>
         <div class="toggle-row">
-          <div class="toggle-info"><div class="toggle-name">Rede de segurança: File Sandbox (UE 5.8)</div><div class="toggle-desc">Ao abrir o editor, entra no sandbox <b>AxivorAI</b>: tudo que a IA grava fica capturado até você clicar em Aplicar ou Descartar na barra de status.</div></div>
+          <div class="toggle-info"><div class="toggle-name">Rede de segurança: File Sandbox (UE 5.9)</div><div class="toggle-desc">Ao abrir o editor, entra no sandbox <b>AxivorAI</b>: tudo que a IA grava fica capturado até você clicar em Aplicar ou Descartar na barra de status.</div></div>
           <div class="tgl" id="tgl-turbo-sandbox" onclick="toggleToolSetting('tgl-turbo-sandbox')"></div>
         </div>
         <div class="ax-turbo-warn">Use com controle de versão. Em Turbo a IA pode apagar, mover e reescrever assets, código e configurações sem perguntar. Requer reiniciar o editor após ativar (carrega os plugins Toolset Registry, All Toolsets e File Sandbox).</div>
@@ -2910,6 +2915,7 @@ function initSettings(data){
 function populateModelDropdowns(lists){
   // Provider dropdowns with modern fallback guarantees
   var fallbackModels = {
+    'claude': ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
     'openai': ['gpt-5.5', 'gpt-5.5-pro', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.2', 'gpt-4.1', 'gpt-4.1-mini', 'o3', 'o3-pro', 'o3-mini', 'o4-mini', 'o1', 'o1-mini', 'gpt-4o', 'gpt-4o-mini'],
     'gemini': ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.1-pro', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
   };
@@ -4243,13 +4249,23 @@ function _acpAuthHtml(a){
   var refreshBtn='<button type="button" class="btn btn-ghost btn-sm" title="Verificar a conexão de novo" onclick="acpAuthRefresh(\''+idEsc+'\')">Atualizar</button>';
   if(!s||s.busy==='probe'){
     cls='busy'; title='Verificando conexão…';
+    if(s&&s.busyStage==='starting') sub='Iniciando o agente; pode levar até um minuto.';
   } else if(s.busy==='login'){
-    cls='busy'; title='Aguardando login…';
-    sub='Conclua no navegador ou na janela que abriu.'
-       +(s.loginUrl?' <a onclick="acpAuthOpenUrl(\''+idEsc+'\')">Abrir página de login</a>':'');
-    btns='<button type="button" class="btn btn-ghost btn-sm" onclick="acpAuthCancel(\''+idEsc+'\')">Cancelar</button>';
+    cls='busy';
+    if(s.busyStage==='starting'){
+      title='Iniciando o agente…';
+      sub='Pode levar até um minuto. Depois disso, o login abre no navegador.';
+    } else {
+      title='Aguardando login…';
+      sub=s.loginUrl?'Conclua no navegador. Se ele não abriu, use o botão ao lado.':'Conclua no navegador ou na janela que abriu.';
+    }
+    btns=(s.loginUrl?'<button type="button" class="btn btn-primary btn-sm" onclick="acpAuthOpenUrl(\''+idEsc+'\')">Abrir página de login</button>':'')
+        +'<button type="button" class="btn btn-ghost btn-sm" onclick="acpAuthCancel(\''+idEsc+'\')">Cancelar</button>';
   } else if(s.busy==='logout'){
-    cls='busy'; title='Deslogando…';
+    cls='busy';
+    title=s.busyStage==='starting'?'Iniciando o agente para deslogar…':'Deslogando…';
+    if(s.busyStage==='starting') sub='Pode levar até um minuto.';
+    btns='<button type="button" class="btn btn-ghost btn-sm" onclick="acpAuthCancel(\''+idEsc+'\')">Cancelar</button>';
   } else if(s.state==='connected'){
     cls='ok';
     title=s.email?('Conectado como '+escACP(s.email)):'Conectado';
@@ -4737,7 +4753,7 @@ function buildSlotJson(){
 }
 
 function saveSlot(){ var j=buildSlotJson(); bridge_saveslot(j); bridge_setactive(curSlot); if(D.slots&&D.slots[curSlot]) try{D.slots[curSlot]=JSON.parse(j);}catch(e){} dirtySlot=false; flash('save-msg'); updateSlotLabel(curSlot,document.getElementById('slot-name').value); }
-function clearSlot(){ bridge_saveslot(JSON.stringify({index:curSlot,name:'',provider:'Free',apiKey:'',geminiModel:'gemini-2.5-flash',openAIModel:'gpt-5-mini-2025-08-07',claudeModel:'claude-sonnet-4-6',deepseekModel:'deepseek-v4-flash',customBaseURL:'',customModelName:'',customParams:'',textureGen:{apiKey:'',endpoint:''},meshGen:{apiKey:''}})); if(D.slots) D.slots[curSlot]={index:curSlot,provider:'Free'}; populateSlot(curSlot); }
+function clearSlot(){ bridge_saveslot(JSON.stringify({index:curSlot,name:'',provider:'Free',apiKey:'',geminiModel:'gemini-2.5-flash',openAIModel:'gpt-5-mini-2025-08-07',claudeModel:'claude-sonnet-5-5',deepseekModel:'deepseek-v4-flash',customBaseURL:'',customModelName:'',customParams:'',textureGen:{apiKey:'',endpoint:''},meshGen:{apiKey:''}})); if(D.slots) D.slots[curSlot]={index:curSlot,provider:'Free'}; populateSlot(curSlot); }
 function saveImg(){
   // Settings owns only the connection (endpoint + key); model/mode are merged in
   // by the bridge so they survive a Settings save (the hub owns them).

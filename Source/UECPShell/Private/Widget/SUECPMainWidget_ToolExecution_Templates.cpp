@@ -1209,7 +1209,7 @@ FReply SUECPMainWidget::OnExportTemplateClicked()
 	else if (Provider == TEXT("Claude"))
 	{
 		FString ClModel = FApiKeyManager::Get().GetActiveClaudeModel();
-		if (ClModel.IsEmpty()) ClModel = TEXT("claude-3-5-haiku-20241022");
+		if (ClModel.IsEmpty()) ClModel = TEXT("claude-sonnet-5-5");
 		Request->SetURL(FHttpCommunicationManager::BuildClaudeUrl());
 		Request->SetHeader(TEXT("x-api-key"), ApiKey);
 		Request->SetHeader(TEXT("anthropic-version"), TEXT("2023-06-01"));

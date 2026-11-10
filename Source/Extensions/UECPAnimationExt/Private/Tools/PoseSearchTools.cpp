@@ -1086,7 +1086,7 @@ void HandleCreatePoseSearchSchemaFromArgs(const TSharedPtr<FJsonObject>& Args,
 	if (!Args.IsValid()) { OutError = TEXT("Invalid args"); return; }
 	FString AssetName = TEXT("PSSchema"), SavePath, SkeletonPath;
 	int32 SampleRate = 30;
-	Args->TryGetStringField(TEXT("asset_name"), AssetName);
+	if (!Args->TryGetStringField(TEXT("asset_name"), AssetName)) Args->TryGetStringField(TEXT("name"), AssetName);
 	Args->TryGetStringField(TEXT("save_path"), SavePath);
 	if (SavePath.IsEmpty()) SavePath = FSettingsManager::GetDefaultSavePath();
 	Args->TryGetStringField(TEXT("skeleton_path"), SkeletonPath);
@@ -1099,7 +1099,7 @@ void HandleCreatePoseSearchDatabaseFromArgs(const TSharedPtr<FJsonObject>& Args,
 {
 	if (!Args.IsValid()) { OutError = TEXT("Invalid args"); return; }
 	FString AssetName = TEXT("PSDatabase"), SavePath, SchemaPath;
-	Args->TryGetStringField(TEXT("asset_name"), AssetName);
+	if (!Args->TryGetStringField(TEXT("asset_name"), AssetName)) Args->TryGetStringField(TEXT("name"), AssetName);
 	Args->TryGetStringField(TEXT("save_path"), SavePath);
 	if (SavePath.IsEmpty()) SavePath = FSettingsManager::GetDefaultSavePath();
 	Args->TryGetStringField(TEXT("schema_path"), SchemaPath);
@@ -1222,7 +1222,7 @@ void HandleCreatePoseSearchNormalizationSetFromArgs(const TSharedPtr<FJsonObject
 {
 	if (!Args.IsValid()) { OutError = TEXT("Invalid args"); return; }
 	FString AssetName = TEXT("PS_NormSet"), SavePath;
-	Args->TryGetStringField(TEXT("asset_name"), AssetName);
+	if (!Args->TryGetStringField(TEXT("asset_name"), AssetName)) Args->TryGetStringField(TEXT("name"), AssetName);
 	Args->TryGetStringField(TEXT("save_path"), SavePath);
 	if (SavePath.IsEmpty()) SavePath = FSettingsManager::GetDefaultSavePath();
 	HandleCreatePoseSearchNormalizationSet(AssetName, SavePath, OutJson, OutError);

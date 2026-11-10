@@ -72,6 +72,10 @@ struct FAgentRunnerInstance
 
 	FString PendingACPPrompt;
 
+	// Recap of the conversation so far, prepended to the first prompt only when the agent
+	// session could not be resumed (session/resume or session/load).
+	FString PendingACPHistoryPrefix;
+
 	TArray<TPair<FString, FString>> PendingACPImages;
 
 	bool bPrefsApplied = false;

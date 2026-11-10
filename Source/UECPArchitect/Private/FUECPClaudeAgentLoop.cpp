@@ -11,6 +11,7 @@
 #include "Interfaces/IHttpResponse.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
 #include "Misc/Base64.h"
 
 namespace
@@ -247,8 +248,49 @@ void FUECPClaudeAgentLoop::Start()
 	SendRound();
 }
 
+// A copy of History whose last two user messages end in a cache breakpoint. The system block's
+// breakpoint only covers tools + system; without these, every round re-bills the whole conversation.
+// Two because a breakpoint only finds a previous write within 20 blocks, and parallel tool results
+// can add more than that in one round. Stored messages stay untouched so windowing keeps working.
+static TArray<TSharedPtr<FJsonValue>> WithHistoryCacheBreakpoints(const TArray<TSharedPtr<FJsonValue>>& InHistory)
+{
+	TArray<TSharedPtr<FJsonValue>> Out = InHistory;
+	int32 Marked = 0;
+	for (int32 i = Out.Num() - 1; i >= 0 && Marked < 2; --i)
+	{
+		const TSharedPtr<FJsonObject> Msg = Out[i].IsValid() ? Out[i]->AsObject() : nullptr;
+		FString Role;
+		if (!Msg.IsValid() || !Msg->TryGetStringField(TEXT("role"), Role) || Role != TEXT("user")) continue;
+
+		const TArray<TSharedPtr<FJsonValue>>* Content = nullptr;
+		if (!Msg->TryGetArrayField(TEXT("content"), Content) || !Content || Content->IsEmpty()) continue;
+		const TSharedPtr<FJsonObject> LastBlock = Content->Last().IsValid() ? Content->Last()->AsObject() : nullptr;
+		if (!LastBlock.IsValid()) continue;
+
+		FString BlockText;
+		if (LastBlock->TryGetStringField(TEXT("text"), BlockText) && BlockText.IsEmpty()) continue;
+
+		TSharedRef<FJsonObject> CacheCtrl = MakeShared<FJsonObject>();
+		CacheCtrl->SetStringField(TEXT("type"), TEXT("ephemeral"));
+		TSharedRef<FJsonObject> MarkedBlock = MakeShared<FJsonObject>();
+		MarkedBlock->Values = LastBlock->Values;
+		MarkedBlock->SetObjectField(TEXT("cache_control"), CacheCtrl);
+
+		TArray<TSharedPtr<FJsonValue>> MarkedContent = *Content;
+		MarkedContent.Last() = MakeShared<FJsonValueObject>(MarkedBlock);
+
+		TSharedRef<FJsonObject> MarkedMsg = MakeShared<FJsonObject>();
+		MarkedMsg->Values = Msg->Values;
+		MarkedMsg->SetArrayField(TEXT("content"), MarkedContent);
+		Out[i] = MakeShared<FJsonValueObject>(MarkedMsg);
+		++Marked;
+	}
+	return Out;
+}
+
 void FUECPClaudeAgentLoop::SendRound()
 {
+	EndRoundTelemetry();
 	if (bStopped.load()) return;
 	if (Round >= MaxRounds)
 	{
@@ -284,13 +326,14 @@ void FUECPClaudeAgentLoop::SendRound()
 	}
 	Payload->SetBoolField(TEXT("stream"), true);
 	Payload->SetArrayField(TEXT("tools"), BuildToolDefinitions());
-	Payload->SetArrayField(TEXT("messages"), History);
+	Payload->SetArrayField(TEXT("messages"), WithHistoryCacheBreakpoints(History));
 
 	FString Body;
 	{
 		TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Body);
 		FJsonSerializer::Serialize(Payload, W);
 	}
+	BeginRoundTelemetry(TEXT("Anthropic"), Body.Len());
 
 	ActiveRequest = FHttpModule::Get().CreateRequest();
 	ActiveRequest->SetVerb(TEXT("POST"));
@@ -298,7 +341,6 @@ void FUECPClaudeAgentLoop::SendRound()
 	ActiveRequest->SetHeader(TEXT("Content-Type"),      TEXT("application/json"));
 	ActiveRequest->SetHeader(TEXT("x-api-key"),         ApiKey);
 	ActiveRequest->SetHeader(TEXT("anthropic-version"), TEXT("2023-06-01"));
-	ActiveRequest->SetHeader(TEXT("anthropic-beta"),    TEXT("prompt-caching-2024-07-31"));
 	ActiveRequest->SetContentAsString(Body);
 	ConfigureRequestTimeout();
 
@@ -379,9 +421,13 @@ void FUECPClaudeAgentLoop::ProcessSseEvent(const FString& EventType, const FStri
 			const TSharedPtr<FJsonObject>* UsagePtr = nullptr;
 			if ((*MsgPtr)->TryGetObjectField(TEXT("usage"), UsagePtr) && UsagePtr)
 			{
+				// input_tokens excludes cache reads and writes; count all three as the prompt.
 				int32 InputTok = 0;
 				(*UsagePtr)->TryGetNumberField(TEXT("input_tokens"), InputTok);
-				if (InputTok > 0) FinalInputTokens = InputTok;
+				(*UsagePtr)->TryGetNumberField(TEXT("cache_read_input_tokens"), RoundCachedTokens);
+				(*UsagePtr)->TryGetNumberField(TEXT("cache_creation_input_tokens"), RoundCacheWriteTokens);
+				const int32 PromptTok = InputTok + RoundCachedTokens + RoundCacheWriteTokens;
+				if (PromptTok > 0) FinalInputTokens = PromptTok;
 			}
 		}
 	}
@@ -396,6 +442,8 @@ void FUECPClaudeAgentLoop::ProcessSseEvent(const FString& EventType, const FStri
 		const TSharedPtr<FJsonObject>* CB = nullptr;
 		if (D->TryGetObjectField(TEXT("content_block"), CB) && CB)
 		{
+			Block.RawBlock = MakeShared<FJsonObject>();
+			Block.RawBlock->Values = (*CB)->Values;
 			(*CB)->TryGetStringField(TEXT("type"),    Block.Type);
 			(*CB)->TryGetStringField(TEXT("id"),      Block.Id);
 			(*CB)->TryGetStringField(TEXT("name"),    Block.ToolName);
@@ -421,6 +469,15 @@ void FUECPClaudeAgentLoop::ProcessSseEvent(const FString& EventType, const FStri
 			Block->TextAccum += Text;
 			AccumulatedText += Text;
 			if (OnTextDelta) OnTextDelta(Text);
+		}
+		else if (Block->RawBlock.IsValid() &&
+			(DeltaType == TEXT("thinking_delta") || DeltaType == TEXT("signature_delta")))
+		{
+			const FString Field = DeltaType == TEXT("thinking_delta") ? TEXT("thinking") : TEXT("signature");
+			FString Existing, Fragment;
+			Block->RawBlock->TryGetStringField(Field, Existing);
+			(*Delta)->TryGetStringField(Field, Fragment);
+			Block->RawBlock->SetStringField(Field, Existing + Fragment);
 		}
 		else if (DeltaType == TEXT("input_json_delta"))
 		{
@@ -573,6 +630,7 @@ void FUECPClaudeAgentLoop::OnRequestComplete(FHttpRequestPtr ,
 
 void FUECPClaudeAgentLoop::DispatchToolsAndLoop()
 {
+	EndRoundTelemetry();
 	if (bStopped.load()) return;
 
 	AppendAssistantMessage();
@@ -757,14 +815,6 @@ void FUECPClaudeAgentLoop::AppendAssistantMessage()
 {
 	TArray<TSharedPtr<FJsonValue>> Content;
 
-	if (!AccumulatedText.IsEmpty())
-	{
-		TSharedRef<FJsonObject> TextBlock = MakeShared<FJsonObject>();
-		TextBlock->SetStringField(TEXT("type"), TEXT("text"));
-		TextBlock->SetStringField(TEXT("text"), AccumulatedText);
-		Content.Add(MakeShared<FJsonValueObject>(TextBlock));
-	}
-
 	TArray<int32> Indices;
 	CurrentBlocks.GetKeys(Indices);
 	Indices.Sort();
@@ -772,6 +822,20 @@ void FUECPClaudeAgentLoop::AppendAssistantMessage()
 	for (int32 Idx : Indices)
 	{
 		const FContentBlock& Block = CurrentBlocks[Idx];
+		// Preserve signed reasoning and the original content order across tool rounds.
+		if (Block.Type == TEXT("thinking") || Block.Type == TEXT("redacted_thinking"))
+		{
+			if (Block.RawBlock.IsValid()) Content.Add(MakeShared<FJsonValueObject>(Block.RawBlock));
+			continue;
+		}
+		if (Block.Type == TEXT("text"))
+		{
+			TSharedRef<FJsonObject> TextBlock = MakeShared<FJsonObject>();
+			TextBlock->SetStringField(TEXT("type"), TEXT("text"));
+			TextBlock->SetStringField(TEXT("text"), Block.TextAccum);
+			Content.Add(MakeShared<FJsonValueObject>(TextBlock));
+			continue;
+		}
 		if (Block.Type != TEXT("tool_use")) continue;
 
 		TSharedPtr<FJsonObject> Input = ParseJsonObject(Block.InputAccum);

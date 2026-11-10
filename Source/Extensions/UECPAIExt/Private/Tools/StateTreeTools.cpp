@@ -1434,7 +1434,12 @@ void HandleCompileStateTree(const FString& AssetPath, FString& OutJsonString, FS
 	TArray<FString> Errors, Warnings;
 	for (const FStateTreeCompilerLogMessage& Msg : Log.GetMessages())
 	{
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 9)
+		// UE 5.9: FStateTreeCompilerLogMessage::Message is an FText.
+		FString Escaped = Msg.Message.ToString().Replace(TEXT("\""), TEXT("\\\""));
+#else
 		FString Escaped = Msg.Message.Replace(TEXT("\""), TEXT("\\\""));
+#endif
 		if (Msg.Severity <= EMessageSeverity::Error)
 			Errors.Add(Escaped);
 		else if (Msg.Severity == EMessageSeverity::Warning)

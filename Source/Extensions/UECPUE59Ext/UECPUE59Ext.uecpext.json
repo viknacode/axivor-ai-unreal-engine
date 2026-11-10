@@ -1,0 +1,29 @@
+{
+  "manifest_version": 1,
+  "api_version": 1,
+  "extension_id": "UE59Features",
+  "display_name": "Unreal 5.9 Agentic Pack",
+  "description": "Tools and guidance for the Unreal Engine 5.9 agentic stack: native Unreal MCP server (coexistence with Axivor's MCP), the new Toolset Registry toolsets (Blueprint Graph DSL, Console, Perf, NavMesh, FileSystem, SceneCapture, Knowledge Base, MCP Client...), Markdown Agent Skills, Unreal Assistant, Unreal Canvas and AnimGen. Status report, one-call plugin presets and skill listing/reading.",
+  "category": "Engine",
+  "catalog_blurb": "5.9 agent stack: MCP, toolsets, Agent Skills, Knowledge Base, Canvas, AnimGen.",
+  "required_module_name": "UECPUE59Ext",
+  "default_enabled": true,
+  "is_third_party": false,
+  "requires_license": false,
+  "min_engine_version": "5.9",
+  "required_plugins": [
+    "ToolsetRegistry"
+  ],
+  "owned_umbrellas": [
+    "ue59"
+  ],
+  "owned_tools": [
+    "ue59_feature_status",
+    "ue59_enable_preset",
+    "ue59_skills",
+    "ue59_mcp_status"
+  ],
+  "umbrella_docs": {
+    "ue59": "Docs/ue59.md"
+  }
+}

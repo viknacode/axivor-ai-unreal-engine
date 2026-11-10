@@ -1057,7 +1057,7 @@ void FUECPArchitectCoordinator::SendChatRequest()
 		}
 	}
 
-	static constexpr int32 MaxArchitectHistoryChars = 320000;
+	static constexpr int32 MaxArchitectHistoryChars = 200000;
 	const TArray<TSharedPtr<FJsonValue>> WindowedHistory =
 		SUECPMainWidget::WindowConversationHistoryForExtraction(W->ArchitectConversationHistory, MaxArchitectHistoryChars);
 
@@ -1157,6 +1157,7 @@ void FUECPArchitectCoordinator::SendChatRequest()
 			Loop->ChatID        = ActiveChatID;
 			Loop->InteractionMode = ChatMode;
 			Loop->History       = OAHistory;
+			Loop->CustomParams  = ActiveSlot.CustomParams;
 			{ int32 R = 200; GConfig->GetInt(TEXT("BpGeneratorUltimate"), TEXT("MaxAgentRounds"), R, GEditorIni); Loop->MaxRounds = R > 0 ? R : 200; }
 
 			if (bIsFreeTierRequest)
@@ -1961,8 +1962,8 @@ void FUECPArchitectCoordinator::SendChatRequest()
 
 		TArray<TSharedPtr<FJsonValue>> CustomMessages;
 		TSharedPtr<FJsonObject> CustomSystemMessage = MakeShareable(new FJsonObject);
-		CustomSystemMessage->SetStringField("role", "system");
-		CustomSystemMessage->SetStringField("content", SystemPrompt);
+		CustomSystemMessage->SetStringField(TEXT("role"), "system");
+		CustomSystemMessage->SetStringField(TEXT("content"), SystemPrompt);
 		CustomMessages.Add(MakeShareable(new FJsonValueObject(CustomSystemMessage)));
 		bool bFileContextAddedCustom = false;
 		for (const TSharedPtr<FJsonValue>& Message : WindowedHistory)
@@ -1975,7 +1976,7 @@ void FUECPArchitectCoordinator::SendChatRequest()
 			if (!MsgObj->TryGetArrayField(TEXT("parts"), PartsArray) || !PartsArray || PartsArray->Num() == 0) continue;
 
 			TSharedPtr<FJsonObject> CustomMessage = MakeShareable(new FJsonObject);
-			CustomMessage->SetStringField("role", Role == TEXT("model") ? TEXT("assistant") : Role);
+			CustomMessage->SetStringField(TEXT("role"), Role == TEXT("model") ? TEXT("assistant") : Role);
 
 			TArray<TSharedPtr<FJsonValue>> ContentArray;
 			for (const TSharedPtr<FJsonValue>& PartValue : *PartsArray)
@@ -2189,14 +2190,14 @@ void FUECPArchitectCoordinator::SendChatRequest()
 		W->ActiveArchitectHttpRequest->SetURL(FHttpCommunicationManager::BuildOpenAIUrl());
 		W->ActiveArchitectHttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *ApiKeyToUse));
 		FString OpenAIModel = FApiKeyManager::Get().GetActiveOpenAIModel();
-		JsonPayload->SetStringField("model", OpenAIModel);
+		JsonPayload->SetStringField(TEXT("model"), OpenAIModel);
 		if (bUseStreaming)
 			JsonPayload->SetBoolField(TEXT("stream"), true);
 
 		TArray<TSharedPtr<FJsonValue>> OpenAiMessages;
 		TSharedPtr<FJsonObject> SystemMessage = MakeShareable(new FJsonObject);
-		SystemMessage->SetStringField("role", "system");
-		SystemMessage->SetStringField("content", SystemPrompt);
+		SystemMessage->SetStringField(TEXT("role"), "system");
+		SystemMessage->SetStringField(TEXT("content"), SystemPrompt);
 		OpenAiMessages.Add(MakeShareable(new FJsonValueObject(SystemMessage)));
 		bool bFileContextAddedOpenAI = false;
 		for (const TSharedPtr<FJsonValue>& Message : WindowedHistory)
@@ -2209,7 +2210,7 @@ void FUECPArchitectCoordinator::SendChatRequest()
 			if (!MsgObj->TryGetArrayField(TEXT("parts"), PartsArray) || !PartsArray || PartsArray->Num() == 0) continue;
 
 			TSharedPtr<FJsonObject> OpenAiMessage = MakeShareable(new FJsonObject);
-			OpenAiMessage->SetStringField("role", Role == TEXT("model") ? TEXT("assistant") : Role);
+			OpenAiMessage->SetStringField(TEXT("role"), Role == TEXT("model") ? TEXT("assistant") : Role);
 
 			TArray<TSharedPtr<FJsonValue>> ContentArray;
 			for (const TSharedPtr<FJsonValue>& PartValue : *PartsArray)
@@ -2678,8 +2679,8 @@ void FUECPArchitectCoordinator::SendChatRequest()
 
 		TArray<TSharedPtr<FJsonValue>> DeepSeekMessages;
 		TSharedPtr<FJsonObject> SystemMessage = MakeShareable(new FJsonObject);
-		SystemMessage->SetStringField("role", "system");
-		SystemMessage->SetStringField("content", SystemPrompt);
+		SystemMessage->SetStringField(TEXT("role"), "system");
+		SystemMessage->SetStringField(TEXT("content"), SystemPrompt);
 		DeepSeekMessages.Add(MakeShareable(new FJsonValueObject(SystemMessage)));
 		bool bFileContextAddedDeepSeek = false;
 		for (const TSharedPtr<FJsonValue>& Message : WindowedHistory)
@@ -2692,7 +2693,7 @@ void FUECPArchitectCoordinator::SendChatRequest()
 			if (!MsgObj->TryGetArrayField(TEXT("parts"), PartsArray) || !PartsArray || PartsArray->Num() == 0) continue;
 
 			TSharedPtr<FJsonObject> DeepSeekMessage = MakeShareable(new FJsonObject);
-			DeepSeekMessage->SetStringField("role", Role == TEXT("model") ? TEXT("assistant") : Role);
+			DeepSeekMessage->SetStringField(TEXT("role"), Role == TEXT("model") ? TEXT("assistant") : Role);
 
 			TArray<TSharedPtr<FJsonValue>> ContentArray;
 			for (const TSharedPtr<FJsonValue>& PartValue : *PartsArray)

@@ -129,6 +129,13 @@
 #include "RetargetEditor/IKRetargetFactory.h"
 #include "RetargetEditor/IKRetargeterController.h"
 #include "RetargetEditor/IKRetargetBatchOperation.h"
+#include "RigEditor/IKRigAutoCharacterizer.h"
+#include "Retargeter/IKRetargetOps.h"
+#include "Retargeter/RetargetOps/FKChainsOp.h"
+#include "Retargeter/RetargetOps/IKChainsOp.h"
+#include "Retargeter/RetargetOps/PelvisMotionOp.h"
+#include "Retargeter/RetargetOps/PinBoneOp.h"
+#include "Retargeter/RetargetOps/RootMotionGeneratorOp.h"
 
 #include "AnimGraphNode_LinkedAnimLayer.h"
 #include "Animation/AnimLayerInterface.h"
@@ -274,6 +281,35 @@ static void CompileAnimBlueprintAndReport(UAnimBlueprint* AnimBP, const TSharedP
 	{
 		Out->SetBoolField(TEXT("compile_deferred"), true);
 		return;
+	}
+
+	// Pre-flight: an Anim Blueprint whose parent class did not load (typical for assets copied
+	// from another project, e.g. GASP's ABP_SandboxCharacter without its parent) has no skeleton
+	// generated class. Compiling it then reaches PropertyAccessEditor's check(InContext.Struct)
+	// and takes the whole editor down (seen on UE 5.9). Refuse with a fixable error instead.
+	{
+		FString Blocker;
+		if (!AnimBP->ParentClass)
+			Blocker = TEXT("its parent class is missing (not loaded or deleted)");
+		else if (AnimBP->ParentClass->HasAnyClassFlags(CLASS_NewerVersionExists))
+			Blocker = FString::Printf(TEXT("its parent class '%s' is a stale (reinstanced) class"), *AnimBP->ParentClass->GetName());
+		else if (!AnimBP->SkeletonGeneratedClass || !AnimBP->GeneratedClass)
+			Blocker = TEXT("it has no generated class (it failed to load/regenerate)");
+		if (!Blocker.IsEmpty())
+		{
+			const FString Msg = FString::Printf(
+				TEXT("Compile skipped for '%s': %s. Compiling it would crash the editor (PropertyAccess assert). ")
+				TEXT("Fix the parent class first (reparent the Anim Blueprint to an existing AnimInstance class, or migrate the missing parent asset), then compile."),
+				*AnimBP->GetPathName(), *Blocker);
+			UE_LOG(LogTemp, Warning, TEXT("[Axivor] %s"), *Msg);
+			Out->SetBoolField(TEXT("compiled"), false);
+			Out->SetBoolField(TEXT("compile_skipped"), true);
+			Out->SetNumberField(TEXT("num_errors"), 1);
+			Out->SetNumberField(TEXT("num_warnings"), 0);
+			Out->SetArrayField(TEXT("compile_errors"), { MakeShared<FJsonValueString>(Msg) });
+			Out->SetArrayField(TEXT("compile_warnings"), {});
+			return;
+		}
 	}
 
 	FCompilerResultsLog Results;
@@ -3067,6 +3103,40 @@ void HandleAddRetargetChain(
 	BuildSuccessJson(Obj, OutJsonString);
 }
 
+// Retarget settings live on the op stack since 5.6. Ops are matched by reflected type name so this
+// module doesn't depend on the op structs' StaticStruct() being reachable from outside IKRig.
+static int32 FindRetargetOpIndex(const UIKRetargeterController* Ctrl, const TCHAR* OpTypeName, int32 StartIndex = 0)
+{
+	for (int32 i = StartIndex; i < Ctrl->GetNumRetargetOps(); ++i)
+	{
+		const FIKRetargetOpBase* Op = Ctrl->GetRetargetOpByIndex(i);
+		if (Op && Op->GetType() && Op->GetType()->GetName() == OpTypeName) return i;
+	}
+	return INDEX_NONE;
+}
+
+// Edits an op's settings in place. Several settings structs (Pelvis, IK Chains, Root Motion) can't be
+// copied outside IKRig through their op controllers: their vtables reference non-exported PostLoads.
+template <typename TSettings>
+static TSettings* GetOpSettingsInPlace(const UIKRetargeterController* Ctrl, int32 OpIndex)
+{
+	FIKRetargetOpBase* Op = Ctrl->GetRetargetOpByIndex(OpIndex);
+	return Op ? static_cast<TSettings*>(Op->GetSettings()) : nullptr;
+}
+
+static TArray<FString> GetUnmappedTargetChains(const UIKRetargeterController* Ctrl)
+{
+	TArray<FString> Unmapped;
+	UIKRigDefinition* TargetRig = Ctrl->GetIKRigWriteable(ERetargetSourceOrTarget::Target);
+	UIKRigController* RigCtrl = TargetRig ? UIKRigController::GetController(TargetRig) : nullptr;
+	if (!RigCtrl) return Unmapped;
+	for (const FBoneChain& Chain : RigCtrl->GetRetargetChains())
+	{
+		if (Ctrl->GetSourceChain(Chain.ChainName) == NAME_None) Unmapped.Add(Chain.ChainName.ToString());
+	}
+	return Unmapped;
+}
+
 void HandleCreateIKRetargeter(
 	const FString& Name,
 	const FString& SavePath,
@@ -3079,6 +3149,19 @@ void HandleCreateIKRetargeter(
 	FString PackagePath = SavePath.IsEmpty() ? TEXT("/Game") : SavePath;
 	while (PackagePath.EndsWith(TEXT("/"))) PackagePath = PackagePath.LeftChop(1);
 
+	UIKRigDefinition* SourceRig = nullptr;
+	if (!SourceIKRigPath.IsEmpty())
+	{
+		SourceRig = Cast<UIKRigDefinition>(UEditorAssetLibrary::LoadAsset(SourceIKRigPath));
+		if (!SourceRig) { SetError(FString::Printf(TEXT("Could not load source IKRig: %s"), *SourceIKRigPath), OutJsonString, OutError); return; }
+	}
+	UIKRigDefinition* TargetRig = nullptr;
+	if (!TargetIKRigPath.IsEmpty())
+	{
+		TargetRig = Cast<UIKRigDefinition>(UEditorAssetLibrary::LoadAsset(TargetIKRigPath));
+		if (!TargetRig) { SetError(FString::Printf(TEXT("Could not load target IKRig: %s"), *TargetIKRigPath), OutJsonString, OutError); return; }
+	}
+
 	UIKRetargetFactory* Factory = NewObject<UIKRetargetFactory>();
 	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
 	UObject* Asset = AssetTools.CreateAsset(Name, PackagePath, UIKRetargeter::StaticClass(), Factory);
@@ -3090,22 +3173,19 @@ void HandleCreateIKRetargeter(
 	}
 
 	UIKRetargeterController* Controller = UIKRetargeterController::GetController(Retargeter);
-	if (Controller)
+	if (!Controller)
 	{
-		if (!SourceIKRigPath.IsEmpty())
-		{
-			UIKRigDefinition* SourceRig = Cast<UIKRigDefinition>(UEditorAssetLibrary::LoadAsset(SourceIKRigPath));
-			if (SourceRig)
-				Controller->SetIKRig(ERetargetSourceOrTarget::Source, SourceRig);
-		}
-
-		if (!TargetIKRigPath.IsEmpty())
-		{
-			UIKRigDefinition* TargetRig = Cast<UIKRigDefinition>(UEditorAssetLibrary::LoadAsset(TargetIKRigPath));
-			if (TargetRig)
-				Controller->SetIKRig(ERetargetSourceOrTarget::Target, TargetRig);
-		}
+		SetError(TEXT("Could not get IKRetargeter controller."), OutJsonString, OutError);
+		return;
 	}
+
+	if (SourceRig) Controller->SetIKRig(ERetargetSourceOrTarget::Source, SourceRig);
+	if (TargetRig) Controller->SetIKRig(ERetargetSourceOrTarget::Target, TargetRig);
+
+	// The factory leaves the stack empty and an empty stack retargets nothing. Ops default to fuzzy
+	// mapping when added, which can map toes to fingers, so remap exactly (same as Epic's auto-retarget).
+	Controller->AddDefaultOps();
+	Controller->AutoMapChains(EAutoMapChainType::Exact, true);
 
 	FString AssetPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
 	UEditorAssetLibrary::SaveAsset(AssetPath, false);
@@ -3116,6 +3196,7 @@ void HandleCreateIKRetargeter(
 	TSharedPtr<FJsonObject> Obj = MakeShareable(new FJsonObject);
 	Obj->SetBoolField(TEXT("success"), true);
 	Obj->SetStringField(TEXT("asset_path"), AssetPath);
+	Obj->SetNumberField(TEXT("num_ops"), Controller->GetNumRetargetOps());
 	BuildSuccessJson(Obj, OutJsonString);
 }
 
@@ -3124,7 +3205,9 @@ void HandleMapRetargetChain(
 	const FString& SourceChain,
 	const FString& TargetChain,
 	bool bAutoMap,
-	FString& OutJsonString, FString& OutError)
+	FString& OutJsonString, FString& OutError,
+	const FString& MapType,
+	bool bForceRemap)
 {
 
 	UIKRetargeter* Retargeter = Cast<UIKRetargeter>(UEditorAssetLibrary::LoadAsset(RetargeterPath));
@@ -3141,9 +3224,20 @@ void HandleMapRetargetChain(
 		return;
 	}
 
+	// Retargeters created before the op-stack fix have nothing to hold a mapping.
+	const bool bAddedOps = Controller->GetNumRetargetOps() == 0;
+	if (bAddedOps) Controller->AddDefaultOps();
+
 	if (bAutoMap)
 	{
-		Controller->AutoMapChains(EAutoMapChainType::Fuzzy, false);
+		EAutoMapChainType AutoMapType = EAutoMapChainType::Exact;
+		if (MapType.Equals(TEXT("fuzzy"), ESearchCase::IgnoreCase)) AutoMapType = EAutoMapChainType::Fuzzy;
+		else if (!MapType.IsEmpty() && !MapType.Equals(TEXT("exact"), ESearchCase::IgnoreCase))
+		{
+			SetError(FString::Printf(TEXT("Unknown map_type '%s' (expected exact or fuzzy)."), *MapType), OutJsonString, OutError);
+			return;
+		}
+		Controller->AutoMapChains(AutoMapType, bForceRemap || bAddedOps);
 	}
 	else if (!SourceChain.IsEmpty() && !TargetChain.IsEmpty())
 	{
@@ -3166,11 +3260,15 @@ void HandleMapRetargetChain(
 	TSharedPtr<FJsonObject> Obj = MakeShareable(new FJsonObject);
 	Obj->SetBoolField(TEXT("success"), true);
 	Obj->SetBoolField(TEXT("auto_mapped"), bAutoMap);
+	if (bAddedOps) Obj->SetBoolField(TEXT("added_default_ops"), true);
 	if (!bAutoMap)
 	{
 		Obj->SetStringField(TEXT("source_chain"), SourceChain);
 		Obj->SetStringField(TEXT("target_chain"), TargetChain);
 	}
+	TArray<TSharedPtr<FJsonValue>> UnmappedJson;
+	for (const FString& Chain : GetUnmappedTargetChains(Controller)) UnmappedJson.Add(MakeShared<FJsonValueString>(Chain));
+	Obj->SetArrayField(TEXT("unmapped_target_chains"), UnmappedJson);
 	BuildSuccessJson(Obj, OutJsonString);
 }
 
@@ -5326,18 +5424,43 @@ void HandleGetRetargeterSummary(const FString& RetargeterPath, FString& OutJson,
 	Root->SetStringField(TEXT("source_pose"), Retargeter->GetCurrentRetargetPoseName(ERetargetSourceOrTarget::Source).ToString());
 	Root->SetStringField(TEXT("target_pose"), Retargeter->GetCurrentRetargetPoseName(ERetargetSourceOrTarget::Target).ToString());
 
-	TArray<TSharedPtr<FJsonValue>> MappingsArr;
-	PRAGMA_DISABLE_DEPRECATION_WARNINGS
-	for (const TObjectPtr<URetargetChainSettings>& ChainSettings : Retargeter->GetAllChainSettings())
-	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	UIKRetargeterController* Ctrl = UIKRetargeterController::GetController(Retargeter);
+	if (!Ctrl)
 	{
-		if (!ChainSettings) continue;
-		TSharedPtr<FJsonObject> MObj = MakeShareable(new FJsonObject);
-		MObj->SetStringField(TEXT("target_chain"), ChainSettings->TargetChain.ToString());
-		MObj->SetStringField(TEXT("source_chain"), ChainSettings->SourceChain.ToString());
-		MappingsArr.Add(MakeShareable(new FJsonValueObject(MObj)));
+		SetError(TEXT("Could not get IKRetargeter controller."), OutJson, OutError);
+		return;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> OpsArr;
+	for (int32 i = 0; i < Ctrl->GetNumRetargetOps(); ++i)
+	{
+		const FIKRetargetOpBase* Op = Ctrl->GetRetargetOpByIndex(i);
+		TSharedPtr<FJsonObject> OpObj = MakeShareable(new FJsonObject);
+		OpObj->SetNumberField(TEXT("index"), i);
+		OpObj->SetStringField(TEXT("name"), Ctrl->GetOpName(i).ToString());
+		OpObj->SetStringField(TEXT("type"), Op && Op->GetType() ? Op->GetType()->GetName() : FString());
+		OpObj->SetBoolField(TEXT("enabled"), Ctrl->GetRetargetOpEnabled(i));
+		OpsArr.Add(MakeShareable(new FJsonValueObject(OpObj)));
+	}
+	Root->SetArrayField(TEXT("ops"), OpsArr);
+
+	TArray<TSharedPtr<FJsonValue>> MappingsArr;
+	TArray<TSharedPtr<FJsonValue>> UnmappedArr;
+	UIKRigDefinition* TargetRigAsset = Ctrl->GetIKRigWriteable(ERetargetSourceOrTarget::Target);
+	if (UIKRigController* RigCtrl = TargetRigAsset ? UIKRigController::GetController(TargetRigAsset) : nullptr)
+	{
+		for (const FBoneChain& Chain : RigCtrl->GetRetargetChains())
+		{
+			const FName SourceChain = Ctrl->GetSourceChain(Chain.ChainName);
+			TSharedPtr<FJsonObject> MObj = MakeShareable(new FJsonObject);
+			MObj->SetStringField(TEXT("target_chain"), Chain.ChainName.ToString());
+			MObj->SetStringField(TEXT("source_chain"), SourceChain.ToString());
+			MappingsArr.Add(MakeShareable(new FJsonValueObject(MObj)));
+			if (SourceChain == NAME_None) UnmappedArr.Add(MakeShared<FJsonValueString>(Chain.ChainName.ToString()));
+		}
 	}
 	Root->SetArrayField(TEXT("chain_mappings"), MappingsArr);
+	Root->SetArrayField(TEXT("unmapped_target_chains"), UnmappedArr);
 	BuildSuccessJson(Root, OutJson);
 }
 
@@ -8186,9 +8309,11 @@ void HandleMapRetargetChainFromArgs(const TSharedPtr<FJsonObject>& Args, FString
 		Batch.Finalize(OutJsonString);
 		return;
 	}
-	FString SC, TC;
+	FString SC, TC, MapType;
 	Args->TryGetStringField(TEXT("source_chain"), SC); Args->TryGetStringField(TEXT("target_chain"), TC);
-	HandleMapRetargetChain(RetargeterPath, SC, TC, bAutoMap, OutJsonString, OutError);
+	Args->TryGetStringField(TEXT("map_type"), MapType);
+	bool bForceRemap = false; Args->TryGetBoolField(TEXT("force_remap"), bForceRemap);
+	HandleMapRetargetChain(RetargeterPath, SC, TC, bAutoMap, OutJsonString, OutError, MapType, bForceRemap);
 }
 
 void HandleRenameVirtualBoneFromArgs(const TSharedPtr<FJsonObject>& Args, FString& OutJsonString, FString& OutError)
@@ -9610,8 +9735,7 @@ void HandleSetAnimCurveKeyFromArgs(const TSharedPtr<FJsonObject>& Args, FString&
 
 void HandleGetRetargeterSummaryFromArgs(const TSharedPtr<FJsonObject>& Args, FString& OutJsonString, FString& OutError)
 {
-	FString P;
-	if (Args.IsValid()) Args->TryGetStringField(TEXT("asset_path"), P);
+	const FString P = Args.IsValid() ? ResolveRetargeterPath(Args) : FString();
 	HandleGetRetargeterSummary(P, OutJsonString, OutError);
 }
 
@@ -11877,22 +12001,28 @@ namespace
 			: ERetargetSourceOrTarget::Target;
 	}
 
-	static ERetargetTranslationMode ParseTranslationMode(const FString& In, ERetargetTranslationMode Default)
+	static bool ParseTranslationMode(const FString& In, EFKChainTranslationMode& Out)
 	{
-		if (In.Equals(TEXT("None"),            ESearchCase::IgnoreCase)) return ERetargetTranslationMode::None;
-		if (In.Equals(TEXT("GloballyScaled"),  ESearchCase::IgnoreCase)) return ERetargetTranslationMode::GloballyScaled;
-		if (In.Equals(TEXT("Absolute"),        ESearchCase::IgnoreCase)) return ERetargetTranslationMode::Absolute;
-		return Default;
+		if (In.Equals(TEXT("None"),                          ESearchCase::IgnoreCase)) { Out = EFKChainTranslationMode::None; return true; }
+		if (In.Equals(TEXT("GloballyScaled"),                ESearchCase::IgnoreCase)) { Out = EFKChainTranslationMode::GloballyScaled; return true; }
+		if (In.Equals(TEXT("Absolute"),                      ESearchCase::IgnoreCase)) { Out = EFKChainTranslationMode::Absolute; return true; }
+		if (In.Equals(TEXT("StretchBoneLengthUniformly"),    ESearchCase::IgnoreCase)) { Out = EFKChainTranslationMode::StretchBoneLengthUniformly; return true; }
+		if (In.Equals(TEXT("StretchBoneLengthNonUniformly"), ESearchCase::IgnoreCase)) { Out = EFKChainTranslationMode::StretchBoneLengthNonUniformly; return true; }
+		if (In.Equals(TEXT("OrientAndScale"),                ESearchCase::IgnoreCase)) { Out = EFKChainTranslationMode::OrientAndScale; return true; }
+		return false;
 	}
 
-	static ERetargetRotationMode ParseRotationMode(const FString& In, ERetargetRotationMode Default)
+	static bool ParseRotationMode(const FString& In, EFKChainRotationMode& Out)
 	{
 		if (In.Equals(TEXT("Interp"),            ESearchCase::IgnoreCase) ||
-			In.Equals(TEXT("Interpolated"),      ESearchCase::IgnoreCase)) return ERetargetRotationMode::Interpolated;
-		if (In.Equals(TEXT("OneToOne"),          ESearchCase::IgnoreCase)) return ERetargetRotationMode::OneToOne;
-		if (In.Equals(TEXT("OneToOneReversed"),  ESearchCase::IgnoreCase)) return ERetargetRotationMode::OneToOneReversed;
-		if (In.Equals(TEXT("None"),              ESearchCase::IgnoreCase)) return ERetargetRotationMode::None;
-		return Default;
+			In.Equals(TEXT("Interpolated"),      ESearchCase::IgnoreCase)) { Out = EFKChainRotationMode::Interpolated; return true; }
+		if (In.Equals(TEXT("OneToOne"),          ESearchCase::IgnoreCase)) { Out = EFKChainRotationMode::OneToOne; return true; }
+		if (In.Equals(TEXT("OneToOneReversed"),  ESearchCase::IgnoreCase)) { Out = EFKChainRotationMode::OneToOneReversed; return true; }
+		if (In.Equals(TEXT("MatchChain"),        ESearchCase::IgnoreCase)) { Out = EFKChainRotationMode::MatchChain; return true; }
+		if (In.Equals(TEXT("MatchScaledChain"),  ESearchCase::IgnoreCase)) { Out = EFKChainRotationMode::MatchScaledChain; return true; }
+		if (In.Equals(TEXT("CopyLocal"),         ESearchCase::IgnoreCase)) { Out = EFKChainRotationMode::CopyLocal; return true; }
+		if (In.Equals(TEXT("None"),              ESearchCase::IgnoreCase)) { Out = EFKChainRotationMode::None; return true; }
+		return false;
 	}
 
 	static FQuat ParseRotationField(const TSharedPtr<FJsonObject>& Owner, const FString& Field)
@@ -11937,49 +12067,87 @@ void HandleSetRetargetChainSettingsFromArgs(const TSharedPtr<FJsonObject>& Args,
 	UIKRetargeterController* Ctrl = UIKRetargeterController::GetController(R);
 	if (!Ctrl) { OutError = TEXT("Could not get IKRetargeter controller."); return; }
 
-	FTargetChainSettings Settings;
-	{
-		PRAGMA_DISABLE_DEPRECATION_WARNINGS
-		const TArray<TObjectPtr<URetargetChainSettings>>& AllChains = R->GetAllChainSettings();
-		PRAGMA_ENABLE_DEPRECATION_WARNINGS
-		for (const URetargetChainSettings* CS : AllChains)
-		{
-			if (CS && CS->TargetChain == FName(*ChainName)) { Settings = CS->Settings; break; }
-		}
-	}
-
+	const FName ChainFName(*ChainName);
 	auto AsBool = [&](const TCHAR* Key, bool& Out) -> bool
 	{
 		bool B; if (Args->TryGetBoolField(Key, B)) { Out = B; return true; }
 		return false;
 	};
-	auto AsFloat = [&](const TCHAR* Key, float& Out) -> bool
+	auto AsDouble = [&](const TCHAR* Key, double& Out) -> bool
 	{
-		double D; if (Args->TryGetNumberField(Key, D)) { Out = (float)D; return true; }
+		double D; if (Args->TryGetNumberField(Key, D)) { Out = D; return true; }
 		return false;
 	};
 	auto AsString = [&](const TCHAR* Key, FString& Out) -> bool { return Args->TryGetStringField(Key, Out); };
 
-	TArray<FString> Applied;
-	FString S;
-	if (AsString(TEXT("fk_translation_mode"), S) || AsString(TEXT("translation_mode"), S))
-	{ Settings.FK.TranslationMode = ParseTranslationMode(S, Settings.FK.TranslationMode); Applied.Add(TEXT("fk_translation_mode")); }
-	if (AsString(TEXT("fk_rotation_mode"), S) || AsString(TEXT("rotation_mode"), S))
-	{ Settings.FK.RotationMode = ParseRotationMode(S, Settings.FK.RotationMode); Applied.Add(TEXT("fk_rotation_mode")); }
-	if (AsFloat(TEXT("fk_translation_alpha"), Settings.FK.TranslationAlpha)) Applied.Add(TEXT("fk_translation_alpha"));
-	if (AsFloat(TEXT("fk_rotation_alpha"),    Settings.FK.RotationAlpha))    Applied.Add(TEXT("fk_rotation_alpha"));
-	if (AsFloat(TEXT("fk_pole_offset"),       Settings.FK.PoleVectorOffset)) Applied.Add(TEXT("fk_pole_offset"));
-	if (AsBool (TEXT("fk_enable"),            Settings.FK.EnableFK))         Applied.Add(TEXT("fk_enable"));
-	if (AsBool (TEXT("ik_enable"),            Settings.IK.EnableIK))         Applied.Add(TEXT("ik_enable"));
-	if (AsFloat(TEXT("ik_blend_to_source"),   Settings.IK.BlendToSource))    Applied.Add(TEXT("ik_blend_to_source"));
-	if (AsFloat(TEXT("ik_extension"),         Settings.IK.Extension))        Applied.Add(TEXT("ik_extension"));
-	if (AsFloat(TEXT("ik_scale_vertical"),    Settings.IK.ScaleVertical))    Applied.Add(TEXT("ik_scale_vertical"));
+	TArray<FString> Applied, Skipped;
 
-	PRAGMA_DISABLE_DEPRECATION_WARNINGS
-	const bool bChainSettingsApplied = Ctrl->SetRetargetChainSettings(FName(*ChainName), Settings);
-	PRAGMA_ENABLE_DEPRECATION_WARNINGS
-	if (!bChainSettingsApplied)
-	{ OutError = FString::Printf(TEXT("Chain '%s' not found on retargeter."), *ChainName); return; }
+	FString TranslationMode, RotationMode;
+	const bool bHasTranslationMode = AsString(TEXT("fk_translation_mode"), TranslationMode) || AsString(TEXT("translation_mode"), TranslationMode);
+	const bool bHasRotationMode = AsString(TEXT("fk_rotation_mode"), RotationMode) || AsString(TEXT("rotation_mode"), RotationMode);
+	const bool bWantsFK = bHasTranslationMode || bHasRotationMode || Args->HasField(TEXT("fk_translation_alpha"))
+		|| Args->HasField(TEXT("fk_rotation_alpha")) || Args->HasField(TEXT("fk_enable"));
+	const bool bWantsIK = Args->HasField(TEXT("ik_enable")) || Args->HasField(TEXT("ik_blend_to_source"))
+		|| Args->HasField(TEXT("ik_extension")) || Args->HasField(TEXT("ik_scale_vertical"));
+
+	if (Args->HasField(TEXT("fk_pole_offset")))
+		Skipped.Add(TEXT("fk_pole_offset: pole vector offset moved to the Align Pole Vector op in 5.6"));
+
+	bool bFoundChain = false;
+	for (int32 OpIndex = FindRetargetOpIndex(Ctrl, TEXT("IKRetargetFKChainsOp")); OpIndex != INDEX_NONE; OpIndex = FindRetargetOpIndex(Ctrl, TEXT("IKRetargetFKChainsOp"), OpIndex + 1))
+	{
+		UIKRetargetFKChainsController* OpCtrl = Cast<UIKRetargetFKChainsController>(Ctrl->GetOpController(OpIndex));
+		if (!OpCtrl) continue;
+		FIKRetargetFKChainsOpSettings OpSettings = OpCtrl->GetSettings();
+		FRetargetFKChainSettings* Chain = OpSettings.ChainsToRetarget.FindByPredicate([&](const FRetargetFKChainSettings& C) { return C.TargetChainName == ChainFName; });
+		if (!Chain) continue;
+		bFoundChain = true;
+		if (!bWantsFK) break;
+
+		if (bHasTranslationMode)
+		{
+			if (!ParseTranslationMode(TranslationMode, Chain->TranslationMode))
+			{ OutError = FString::Printf(TEXT("Unknown fk_translation_mode '%s'. Valid: None, GloballyScaled, Absolute, StretchBoneLengthUniformly, StretchBoneLengthNonUniformly, OrientAndScale."), *TranslationMode); return; }
+			Applied.Add(TEXT("fk_translation_mode"));
+		}
+		if (bHasRotationMode)
+		{
+			if (!ParseRotationMode(RotationMode, Chain->RotationMode))
+			{ OutError = FString::Printf(TEXT("Unknown fk_rotation_mode '%s'. Valid: None, Interpolated, OneToOne, OneToOneReversed, MatchChain, MatchScaledChain, CopyLocal."), *RotationMode); return; }
+			Applied.Add(TEXT("fk_rotation_mode"));
+		}
+		if (AsDouble(TEXT("fk_translation_alpha"), Chain->TranslationAlpha)) Applied.Add(TEXT("fk_translation_alpha"));
+		if (AsDouble(TEXT("fk_rotation_alpha"),    Chain->RotationAlpha))    Applied.Add(TEXT("fk_rotation_alpha"));
+		if (AsBool  (TEXT("fk_enable"),            Chain->EnableFK))         Applied.Add(TEXT("fk_enable"));
+		OpCtrl->SetSettings(OpSettings);
+		break;
+	}
+
+	if (bWantsIK)
+	{
+		bool bAppliedIK = false;
+		for (int32 OpIndex = FindRetargetOpIndex(Ctrl, TEXT("IKRetargetIKChainsOp")); OpIndex != INDEX_NONE; OpIndex = FindRetargetOpIndex(Ctrl, TEXT("IKRetargetIKChainsOp"), OpIndex + 1))
+		{
+			FIKRetargetIKChainsOpSettings* OpSettings = GetOpSettingsInPlace<FIKRetargetIKChainsOpSettings>(Ctrl, OpIndex);
+			if (!OpSettings) continue;
+			FRetargetIKChainSettings* Chain = OpSettings->ChainsToRetarget.FindByPredicate([&](const FRetargetIKChainSettings& C) { return C.TargetChainName == ChainFName; });
+			if (!Chain) continue;
+			bFoundChain = true;
+			FScopedReinitializeIKRetargeter Reinitialize(Ctrl);
+			R->Modify();
+			if (AsBool  (TEXT("ik_enable"),          Chain->EnableIK))      Applied.Add(TEXT("ik_enable"));
+			if (AsDouble(TEXT("ik_blend_to_source"), Chain->BlendToSource)) Applied.Add(TEXT("ik_blend_to_source"));
+			if (AsDouble(TEXT("ik_extension"),       Chain->Extension))     Applied.Add(TEXT("ik_extension"));
+			if (AsDouble(TEXT("ik_scale_vertical"),  Chain->ScaleVertical)) Applied.Add(TEXT("ik_scale_vertical"));
+			bAppliedIK = true;
+			break;
+		}
+		if (!bAppliedIK)
+			Skipped.Add(TEXT("ik_*: no IK Chains op holds this chain (the default stack has none, and the chain needs an IK goal)"));
+	}
+
+	if (!bFoundChain)
+	{ OutError = FString::Printf(TEXT("Chain '%s' not found in the retargeter's FK/IK chain ops (num_ops=%d)."), *ChainName, Ctrl->GetNumRetargetOps()); return; }
 
 	UEditorAssetLibrary::SaveAsset(RetargeterPath, false);
 
@@ -11990,6 +12158,12 @@ void HandleSetRetargetChainSettingsFromArgs(const TSharedPtr<FJsonObject>& Args,
 	TArray<TSharedPtr<FJsonValue>> AppliedJson;
 	for (const FString& K : Applied) AppliedJson.Add(MakeShared<FJsonValueString>(K));
 	Obj->SetArrayField(TEXT("applied"), AppliedJson);
+	if (Skipped.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> SkippedJson;
+		for (const FString& K : Skipped) SkippedJson.Add(MakeShared<FJsonValueString>(K));
+		Obj->SetArrayField(TEXT("skipped"), SkippedJson);
+	}
 	BuildSuccessJson(Obj, OutJsonString);
 }
 
@@ -12005,36 +12179,36 @@ void HandleSetRetargetRootSettingsFromArgs(const TSharedPtr<FJsonObject>& Args, 
 	UIKRetargeterController* Ctrl = UIKRetargeterController::GetController(R);
 	if (!Ctrl) { OutError = TEXT("Could not get IKRetargeter controller."); return; }
 
-	PRAGMA_DISABLE_DEPRECATION_WARNINGS
-	FTargetRootSettings Root = Ctrl->GetRootSettings();
-	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	const int32 PelvisOpIndex = FindRetargetOpIndex(Ctrl, TEXT("IKRetargetPelvisMotionOp"));
+	FIKRetargetPelvisMotionOpSettings* PelvisSettings = PelvisOpIndex == INDEX_NONE ? nullptr : GetOpSettingsInPlace<FIKRetargetPelvisMotionOpSettings>(Ctrl, PelvisOpIndex);
+	if (!PelvisSettings) { OutError = FString::Printf(TEXT("Retargeter has no Pelvis Motion op (num_ops=%d)."), Ctrl->GetNumRetargetOps()); return; }
+	FIKRetargetPelvisMotionOpSettings& Root = *PelvisSettings;
+	R->Modify();
 
-	auto AsFloat = [&](const TCHAR* Key, float& Out) -> bool
-	{ double D; if (Args->TryGetNumberField(Key, D)) { Out = (float)D; return true; } return false; };
+	auto AsDouble = [&](const TCHAR* Key, double& Out) -> bool
+	{ double D; if (Args->TryGetNumberField(Key, D)) { Out = D; return true; } return false; };
 
 	TArray<FString> Applied;
-	if (AsFloat(TEXT("rotation_alpha"),       Root.RotationAlpha))    Applied.Add(TEXT("rotation_alpha"));
-	if (AsFloat(TEXT("translation_alpha"),    Root.TranslationAlpha)) Applied.Add(TEXT("translation_alpha"));
-	if (AsFloat(TEXT("blend_to_source"),      Root.BlendToSource))    Applied.Add(TEXT("blend_to_source"));
-	if (AsFloat(TEXT("scale_horizontal"),     Root.ScaleHorizontal))  Applied.Add(TEXT("scale_horizontal"));
-	if (AsFloat(TEXT("scale_vertical"),       Root.ScaleVertical))    Applied.Add(TEXT("scale_vertical"));
-	if (AsFloat(TEXT("affect_ik_horizontal"), Root.AffectIKHorizontal)) Applied.Add(TEXT("affect_ik_horizontal"));
-	if (AsFloat(TEXT("affect_ik_vertical"),   Root.AffectIKVertical))   Applied.Add(TEXT("affect_ik_vertical"));
+	if (AsDouble(TEXT("rotation_alpha"),       Root.RotationAlpha))    Applied.Add(TEXT("rotation_alpha"));
+	if (AsDouble(TEXT("translation_alpha"),    Root.TranslationAlpha)) Applied.Add(TEXT("translation_alpha"));
+	if (AsDouble(TEXT("blend_to_source"),      Root.BlendToSourceTranslation)) Applied.Add(TEXT("blend_to_source"));
+	if (AsDouble(TEXT("scale_horizontal"),     Root.ScaleHorizontal))  Applied.Add(TEXT("scale_horizontal"));
+	if (AsDouble(TEXT("scale_vertical"),       Root.ScaleVertical))    Applied.Add(TEXT("scale_vertical"));
+	if (AsDouble(TEXT("affect_ik_horizontal"), Root.AffectIKHorizontal)) Applied.Add(TEXT("affect_ik_horizontal"));
+	if (AsDouble(TEXT("affect_ik_vertical"),   Root.AffectIKVertical))   Applied.Add(TEXT("affect_ik_vertical"));
 
 	const TSharedPtr<FJsonObject>* OffObj = nullptr;
 	if (Args->TryGetObjectField(TEXT("blend_to_source_weights"), OffObj) && OffObj && OffObj->IsValid())
 	{
-		double X = Root.BlendToSourceWeights.X, Y = Root.BlendToSourceWeights.Y, Z = Root.BlendToSourceWeights.Z;
+		double X = Root.BlendToSourceTranslationWeights.X, Y = Root.BlendToSourceTranslationWeights.Y, Z = Root.BlendToSourceTranslationWeights.Z;
 		(*OffObj)->TryGetNumberField(TEXT("x"), X);
 		(*OffObj)->TryGetNumberField(TEXT("y"), Y);
 		(*OffObj)->TryGetNumberField(TEXT("z"), Z);
-		Root.BlendToSourceWeights = FVector((float)X, (float)Y, (float)Z);
+		Root.BlendToSourceTranslationWeights = FVector(X, Y, Z);
 		Applied.Add(TEXT("blend_to_source_weights"));
 	}
 
-	PRAGMA_DISABLE_DEPRECATION_WARNINGS
-	Ctrl->SetRootSettings(Root);
-	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	{ FScopedReinitializeIKRetargeter Reinitialize(Ctrl); }
 	UEditorAssetLibrary::SaveAsset(RetargeterPath, false);
 
 	TSharedPtr<FJsonObject> Obj = MakeShareable(new FJsonObject);
@@ -12662,6 +12836,10 @@ namespace CompositeTemplate
 					for (const FHeuristicBone& B : Bones)
 					{
 						if (B.Side != Side || IsHelperBone(B)) continue;
+						// Only real fingers: below the hand (index_toe etc. match by name too) and without the
+						// metacarpal, which Epic's templates keep in a separate chain from the 3 phalanges.
+						if (Hand != INDEX_NONE && !IsDescendantOf(Bones, B.Index, Hand)) continue;
+						if (B.Core.Contains(TEXT("carpal")) || B.Core.Contains(TEXT("spring")) || B.Core.Contains(TEXT("string"))) continue;
 						bool bMatch = false;
 						for (const FString& K : F.Keys) if (B.Core.Contains(K)) { bMatch = true; break; }
 						if (bMatch && (Start == INDEX_NONE || B.Index < Start)) Start = B.Index;
@@ -13469,10 +13647,11 @@ void HandleRetargetSetupFromArgs(const TSharedPtr<FJsonObject>& Args, FString& O
 	Args->TryGetStringField(TEXT("prefix"), Prefix);
 	Args->TryGetStringField(TEXT("suffix"), Suffix);
 	Args->TryGetStringField(TEXT("animation_output_folder"), AnimOutputFolder);
-	bool bAutoMap = true, bAutoAlign = true, bFingers = false;
+	bool bAutoMap = true, bAutoAlign = true, bFingers = true, bAutoFBIK = false;
 	Args->TryGetBoolField(TEXT("auto_map"), bAutoMap);
 	Args->TryGetBoolField(TEXT("auto_align"), bAutoAlign);
 	Args->TryGetBoolField(TEXT("include_fingers"), bFingers);
+	Args->TryGetBoolField(TEXT("auto_fbik"), bAutoFBIK);
 	const TArray<FString> Animations = ReadStringArray(Args, TEXT("animations"));
 
 	if (SourceMeshPath.IsEmpty() || TargetMeshPath.IsEmpty()) { SetError(TEXT("source_mesh_path and target_mesh_path are required"), OutJsonString, OutError); return; }
@@ -13498,8 +13677,9 @@ void HandleRetargetSetupFromArgs(const TSharedPtr<FJsonObject>& Args, FString& O
 	TArray<FString> Notes;
 	TSharedPtr<FJsonObject> Obj = MakeShareable(new FJsonObject);
 
-	// One IK Rig per side: create (or reuse), retarget root, standard humanoid chains.
-	auto BuildRig = [&](const TCHAR* Side, USkeletalMesh* Mesh, const FString& MeshObjPath, const FString& RigName, FString& OutRigPath) -> TSharedPtr<FJsonObject>
+	// One IK Rig per side: create (or reuse), then Epic's skeleton template when the mesh matches one,
+	// else retarget root + standard humanoid chains from bone-name heuristics.
+	auto BuildRig = [&](const TCHAR* Side, USkeletalMesh* Mesh, const FString& MeshObjPath, const FString& RigName, FString& OutRigPath, FAutoCharacterizeResults& OutAuto) -> TSharedPtr<FJsonObject>
 	{
 		TSharedPtr<FJsonObject> RigJson = MakeShared<FJsonObject>();
 		const FString RigPath = OutputFolder + TEXT("/") + RigName;
@@ -13519,6 +13699,41 @@ void HandleRetargetSetupFromArgs(const TSharedPtr<FJsonObject>& Args, FString& O
 		}
 		RigJson->SetStringField(TEXT("path"), OutRigPath);
 		RigJson->SetStringField(TEXT("mesh"), MeshObjPath);
+
+		if (!bExists)
+		{
+			UIKRigDefinition* NewRig = Cast<UIKRigDefinition>(UEditorAssetLibrary::LoadAsset(OutRigPath));
+			UIKRigController* RigCtrl = NewRig ? UIKRigController::GetController(NewRig) : nullptr;
+			if (RigCtrl) RigCtrl->AutoGenerateRetargetDefinition(OutAuto);
+			if (RigCtrl && OutAuto.bUsedTemplate)
+			{
+				RigCtrl->SetRetargetDefinition(OutAuto.AutoRetargetDefinition.RetargetDefinition);
+
+				TArray<TSharedPtr<FJsonValue>> TemplateChains;
+				TArray<FName> FingerChains;
+				for (const FBoneChain& C : RigCtrl->GetRetargetChains())
+				{
+					const FString Lower = C.ChainName.ToString().ToLower();
+					const bool bFingerChain = !Lower.Contains(TEXT("toe")) && (Lower.Contains(TEXT("thumb")) || Lower.Contains(TEXT("index"))
+						|| Lower.Contains(TEXT("middle")) || Lower.Contains(TEXT("ring")) || Lower.Contains(TEXT("pinky")));
+					if (bFingerChain && !bFingers) { FingerChains.Add(C.ChainName); continue; }
+					TSharedPtr<FJsonObject> CJ = MakeShared<FJsonObject>();
+					CJ->SetStringField(TEXT("chain"), C.ChainName.ToString());
+					CJ->SetBoolField(TEXT("ok"), true);
+					CJ->SetStringField(TEXT("start_bone"), C.StartBone.BoneName.ToString());
+					CJ->SetStringField(TEXT("end_bone"), C.EndBone.BoneName.ToString());
+					TemplateChains.Add(MakeShared<FJsonValueObject>(CJ));
+				}
+				for (const FName& Finger : FingerChains) RigCtrl->RemoveRetargetChain(Finger);
+				UEditorAssetLibrary::SaveAsset(OutRigPath, false);
+
+				Log.Ok(FString::Printf(TEXT("%s retarget definition"), Side), FString::Printf(TEXT("Epic template '%s'"), *OutAuto.BestTemplateName.ToString()));
+				RigJson->SetStringField(TEXT("template"), OutAuto.BestTemplateName.ToString());
+				RigJson->SetStringField(TEXT("retarget_root"), OutAuto.AutoRetargetDefinition.RetargetDefinition.PelvisBone.ToString());
+				RigJson->SetArrayField(TEXT("chains"), TemplateChains);
+				return RigJson;
+			}
+		}
 
 		TArray<FHeuristicBone> Bones;
 		BuildBoneInfos(Mesh->GetRefSkeleton(), Bones);
@@ -13578,8 +13793,9 @@ void HandleRetargetSetupFromArgs(const TSharedPtr<FJsonObject>& Args, FString& O
 	};
 
 	FString SourceRigPath, TargetRigPath;
-	Obj->SetObjectField(TEXT("source_ik_rig"), BuildRig(TEXT("source"), SourceMesh, SourceMeshObjPath, SourceRigName, SourceRigPath));
-	Obj->SetObjectField(TEXT("target_ik_rig"), BuildRig(TEXT("target"), TargetMesh, TargetMeshObjPath, TargetRigName, TargetRigPath));
+	FAutoCharacterizeResults SourceAuto, TargetAuto;
+	Obj->SetObjectField(TEXT("source_ik_rig"), BuildRig(TEXT("source"), SourceMesh, SourceMeshObjPath, SourceRigName, SourceRigPath, SourceAuto));
+	Obj->SetObjectField(TEXT("target_ik_rig"), BuildRig(TEXT("target"), TargetMesh, TargetMeshObjPath, TargetRigName, TargetRigPath, TargetAuto));
 
 	auto FinishFail = [&](const FString& Err)
 	{
@@ -13594,9 +13810,20 @@ void HandleRetargetSetupFromArgs(const TSharedPtr<FJsonObject>& Args, FString& O
 
 	// Retargeter.
 	FString RetargeterPath = OutputFolder + TEXT("/") + RetargeterName;
-	if (UEditorAssetLibrary::DoesAssetExist(RetargeterPath) && Cast<UIKRetargeter>(UEditorAssetLibrary::LoadAsset(RetargeterPath)))
+	// Only a fresh stack gets the setup below: a reused retargeter keeps the user's op settings. An empty
+	// stack (assets created before ops were added on creation) is treated as fresh.
+	bool bConfigureStack = false;
+	UIKRetargeter* ExistingRetargeter = UEditorAssetLibrary::DoesAssetExist(RetargeterPath) ? Cast<UIKRetargeter>(UEditorAssetLibrary::LoadAsset(RetargeterPath)) : nullptr;
+	if (ExistingRetargeter)
 	{
-		Log.Ok(TEXT("retargeter"), TEXT("already existed; reused"));
+		UIKRetargeterController* ExistingCtrl = UIKRetargeterController::GetController(ExistingRetargeter);
+		if (ExistingCtrl && ExistingCtrl->GetNumRetargetOps() == 0)
+		{
+			ExistingCtrl->AddDefaultOps();
+			bConfigureStack = true;
+			Log.Ok(TEXT("retargeter"), TEXT("already existed with an empty op stack; added the default ops"));
+		}
+		else Log.Ok(TEXT("retargeter"), TEXT("already existed; reused"));
 	}
 	else
 	{
@@ -13605,16 +13832,27 @@ void HandleRetargetSetupFromArgs(const TSharedPtr<FJsonObject>& Args, FString& O
 		TSharedPtr<FJsonObject> R = Log.Record(TEXT("retargeter"), J, E);
 		if (!R.IsValid()) { FinishFail(TEXT("retarget_setup: the IK Retargeter could not be created; see steps[].")); return; }
 		R->TryGetStringField(TEXT("asset_path"), RetargeterPath);
+		bConfigureStack = true;
 	}
 	Obj->SetStringField(TEXT("retargeter"), RetargeterPath);
 
 	if (bAutoMap)
 	{
 		FString J, E;
-		HandleMapRetargetChain(RetargeterPath, FString(), FString(), true, J, E);
-		Log.Record(TEXT("map chains (auto, fuzzy)"), J, E);
+		HandleMapRetargetChain(RetargeterPath, FString(), FString(), true, J, E, TEXT("exact"), bConfigureStack);
+		TSharedPtr<FJsonObject> MapResult = Log.Record(TEXT("map chains (auto, exact)"), J, E);
+		const TArray<TSharedPtr<FJsonValue>>* Unmapped = nullptr;
+		if (MapResult.IsValid() && MapResult->TryGetArrayField(TEXT("unmapped_target_chains"), Unmapped) && Unmapped && Unmapped->Num() > 0)
+		{
+			TArray<FString> Names;
+			for (const TSharedPtr<FJsonValue>& V : *Unmapped) Names.Add(V->AsString());
+			Notes.Add(FString::Printf(TEXT("Target chains with no exact source match stay at the retarget pose: %s (map them with map_retarget_chain)."), *FString::Join(Names, TEXT(", "))));
+		}
 	}
 	else Log.Skip(TEXT("map chains"), TEXT("auto_map=false; map chains with map_retarget_chain"));
+
+	UIKRetargeter* RetargeterAsset = Cast<UIKRetargeter>(UEditorAssetLibrary::LoadAsset(RetargeterPath));
+	UIKRetargeterController* RetargetCtrl = RetargeterAsset ? UIKRetargeterController::GetController(RetargeterAsset) : nullptr;
 
 	if (bAutoAlign)
 	{
@@ -13624,8 +13862,94 @@ void HandleRetargetSetupFromArgs(const TSharedPtr<FJsonObject>& Args, FString& O
 		FString J, E;
 		HandleAutoAlignRetargetPoseFromArgs(A, J, E);
 		Log.Record(TEXT("auto align retarget pose (target)"), J, E);
+
+		// Templates keep some bones (biped feet) out of auto-align so they stay flat.
+		const TArray<FName>& ExcludedBones = TargetAuto.AutoRetargetDefinition.BonesToExcludeFromAutoPose;
+		if (RetargetCtrl && bConfigureStack && TargetAuto.bUsedTemplate && !ExcludedBones.IsEmpty())
+		{
+			RetargetCtrl->ResetRetargetPose(RetargetCtrl->GetCurrentRetargetPoseName(ERetargetSourceOrTarget::Target), ExcludedBones, ERetargetSourceOrTarget::Target);
+			Log.Ok(TEXT("restore bones excluded from auto pose"), FString::Printf(TEXT("%d bone(s)"), ExcludedBones.Num()));
+		}
 	}
 	else Log.Skip(TEXT("auto align retarget pose"), TEXT("auto_align=false"));
+
+	// Same op setup as Epic's auto-retarget: IK pass off unless asked for, root motion matched to the
+	// skeletons, and the template's ik_* bones pinned to the new hand/foot locations.
+	if (RetargetCtrl && bConfigureStack)
+	{
+		const int32 RunIKIndex = FindRetargetOpIndex(RetargetCtrl, TEXT("IKRetargetRunIKRigOp"));
+		bool bKeepIK = false;
+		if (bAutoFBIK)
+		{
+			UIKRigDefinition* TargetRigAsset = Cast<UIKRigDefinition>(UEditorAssetLibrary::LoadAsset(TargetRigPath));
+			UIKRigController* TargetRigCtrl = TargetRigAsset ? UIKRigController::GetController(TargetRigAsset) : nullptr;
+			if (TargetRigCtrl && TargetRigCtrl->GetNumSolvers() > 0)
+			{
+				bKeepIK = true;
+				Log.Ok(TEXT("auto fbik"), TEXT("target rig already has a solver; kept"));
+			}
+			else if (TargetRigCtrl && TargetRigCtrl->ApplyAutoFBIK())
+			{
+				bKeepIK = true;
+				UEditorAssetLibrary::SaveAsset(TargetRigPath, false);
+				Log.Ok(TEXT("auto fbik"), TEXT("full body IK generated on the target rig"));
+			}
+			else Log.Fail(TEXT("auto fbik"), TEXT("Epic could not generate a full body IK setup for this skeleton; the IK pass stays disabled"));
+		}
+		if (RunIKIndex != INDEX_NONE)
+		{
+			RetargetCtrl->SetRetargetOpEnabled(RunIKIndex, bKeepIK);
+			if (!bKeepIK) Notes.Add(TEXT("Run IK Rig op is disabled (Epic's auto-retarget does the same): the result is FK only. Pass auto_fbik=true to generate full body IK on the target rig and keep the IK pass on."));
+		}
+
+		const int32 RootOpIndex = FindRetargetOpIndex(RetargetCtrl, TEXT("IKRetargetRootMotionOp"));
+		FIKRetargetRootMotionOpSettings* RootSettings = RootOpIndex == INDEX_NONE ? nullptr : GetOpSettingsInPlace<FIKRetargetRootMotionOpSettings>(RetargetCtrl, RootOpIndex);
+		if (RootSettings)
+		{
+			const FName TargetRoot = TargetMesh->GetRefSkeleton().GetBoneName(0);
+			const FName SourceRoot = SourceMesh->GetRefSkeleton().GetBoneName(0);
+			if (TargetRoot == RetargetCtrl->GetPelvisBone(ERetargetSourceOrTarget::Target))
+			{
+				RetargetCtrl->SetRetargetOpEnabled(RootOpIndex, false);
+				Log.Ok(TEXT("root motion op"), TEXT("target pelvis is its root; the Pelvis op handles root motion"));
+			}
+			else if (SourceRoot == RetargetCtrl->GetPelvisBone(ERetargetSourceOrTarget::Source))
+			{
+				FScopedReinitializeIKRetargeter Reinitialize(RetargetCtrl);
+				RetargeterAsset->Modify();
+				RootSettings->RootMotionSource = ERootMotionSource::GenerateFromTargetPelvis;
+				RootSettings->RootHeightSource = ERootMotionHeightSource::SnapToGround;
+				RootSettings->bRotateWithPelvis = true;
+				RootSettings->bMaintainOffsetFromPelvis = true;
+				Log.Ok(TEXT("root motion op"), TEXT("source has no root bone; generated from the target pelvis"));
+			}
+		}
+
+		const TArray<FBoneToPin>& BonesToPin = TargetAuto.AutoRetargetDefinition.BonesToPin.GetBonesToPin();
+		if (TargetAuto.bUsedTemplate && !BonesToPin.IsEmpty())
+		{
+			const int32 PinOpIndex = RetargetCtrl->AddRetargetOp(FString(TEXT("/Script/IKRig.IKRetargetPinBoneOp")));
+			UIKRetargetPinBoneController* PinCtrl = PinOpIndex == INDEX_NONE ? nullptr : Cast<UIKRetargetPinBoneController>(RetargetCtrl->GetOpController(PinOpIndex));
+			if (PinCtrl)
+			{
+				FIKRetargetPinBoneOpSettings PinSettings = PinCtrl->GetSettings();
+				PinSettings.TranslationMode = EPinBoneTranslationMode::CopyGlobalPosition;
+				PinSettings.RotationMode = EPinBoneRotationMode::CopyGlobalRotation;
+				for (const FBoneToPin& Pin : BonesToPin)
+				{
+					FPinBoneData PinData;
+					PinData.BoneToCopyFrom.BoneName = Pin.BoneToPinTo;
+					PinData.BoneToCopyTo.BoneName = Pin.BoneToPin;
+					PinSettings.BonesToPin.Add(PinData);
+				}
+				PinCtrl->SetSettings(PinSettings);
+				Log.Ok(TEXT("pin bone op"), FString::Printf(TEXT("%d ik bone(s) pinned"), BonesToPin.Num()));
+			}
+			else Log.Fail(TEXT("pin bone op"), TEXT("could not add the Pin Bone op; ik_* bones keep their source offset"));
+		}
+
+		UEditorAssetLibrary::SaveAsset(RetargeterPath, false);
+	}
 
 	// Per-animation export so each input gets its own ok/error entry.
 	TArray<TSharedPtr<FJsonValue>> AnimResults;

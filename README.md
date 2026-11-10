@@ -5,13 +5,13 @@
 <h1 align="center">Axivor AI</h1>
 
 <p align="center">
-  <img alt="Unreal Engine 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.8-0e1128?logo=unrealengine&logoColor=white">
+  <img alt="Unreal Engine 5.9" src="https://img.shields.io/badge/Unreal%20Engine-5.9-0e1128?logo=unrealengine&logoColor=white">
   <img alt="Platform Win64" src="https://img.shields.io/badge/platform-Win64-8b7cf6">
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-8b7cf6">
 </p>
 
 <p align="center">
-  <b>An engineering copilot that lives inside the Unreal Engine 5.8 editor.</b><br>
+  <b>An engineering copilot that lives inside the Unreal Engine 5.9 editor.</b><br>
   Describe what you want; Axivor builds, edits, verifies and debugs Blueprints, C++, levels, animation, materials and more — with you, in the editor, using the real engine APIs.
 </p>
 
@@ -41,7 +41,8 @@
 | Animation | Locomotion state machines, montages, additive setup, IK retargeting, Motion Matching, foot IK — each with a compile report |
 | Materials | Node graphs addressed by GUID handles, transactions (undo), validation that waits for shader compilation |
 | UE 5.8 | Procedural Vegetation Editor, Control Rig Physics, Direct Mesh Control, MetaHuman (Python), MegaLights / Lumen / Substrate presets, fast physics-asset iteration, Game Animation Sample setup |
-| Engine toolsets | Native UE 5.8 Toolset Registry and File Sandbox (persist / discard) |
+| Engine toolsets | Native UE 5.9 Toolset Registry and File Sandbox (persist / discard) |
+| UE 5.9 agents | Axivor registered as the native `Axivor` toolset (usable from Unreal MCP and Unreal Assistant), Agent Skill shipped in `Skills/`, one-call presets for the 5.9 agent stack (toolsets, Knowledge Base, Blueprint Graph DSL, Canvas, AnimGen) |
 | Everything else | GAS, Niagara, UI/UMG/MVVM, Input, Data assets, Cinematics, Audio, Water, Vehicles, Mass, Mover, Geometry Script, Game Features, Packaging, Validation, Python |
 
 **Project Scanner** — indexes the project and answers questions about assets, dependencies and performance, often locally without an API call.
@@ -75,10 +76,10 @@
 
 ## Install
 
-Requirements: **Unreal Engine 5.8**, Windows 64-bit (Mac/Linux modules are listed but only Win64 is exercised), Visual Studio 2022 with the C++ game development workload.
+Requirements: **Unreal Engine 5.9** (MegaJam Preview or later), Windows 64-bit (Mac/Linux modules are listed but only Win64 is exercised), Visual Studio 2022 with the C++ game development workload.
 
 ```bash
-git clone https://github.com/viknacode/axivor-ai-unreal-engine.git "<YourProject>/Plugins/AxivorAI_UE5.8"
+git clone https://github.com/viknacode/axivor-ai-unreal-engine.git "<YourProject>/Plugins/AxivorAI_UE5.9"
 ```
 
 1. Right-click your `.uproject` → **Generate Visual Studio project files**.
@@ -135,4 +136,4 @@ Resources/UI                    app_shell.html, settings_ui.html, welcome_screen
 
 ## Status
 
-Actively developed against UE 5.8. Windows is the tested platform. Expect breaking changes to tool parameters between versions; the in-editor `get_tool_docs` is always the source of truth.
+Actively developed against UE 5.9 (Preview). Windows is the tested platform. Expect breaking changes to tool parameters between versions; the in-editor `get_tool_docs` is always the source of truth.

@@ -10,7 +10,7 @@ validators *before* a cook, not after a 10-minute build fails.
 - **validate_asset** — Validate one asset. Param `asset_path` (a package path `/Game/Path/BP_Foo`
   or a full object path `/Game/Path/BP_Foo.BP_Foo`). Returns its `result` plus `errors[]` and
   `warnings[]`.
-- **validate_assets** — Validate every asset under a folder. Params: `folder_path` (e.g.
+- **validate_folder** — Validate every asset under a folder. Params: `folder_path` (e.g.
   `/Game/Weapons`), `recursive` (default true), `max_reported` (default 100, max 1000). Returns the
   summary counts + per-asset `issues[]` (capped).
 - **validate_project** — Validate all `/Game` assets. Param `max_reported` (default 100). Returns

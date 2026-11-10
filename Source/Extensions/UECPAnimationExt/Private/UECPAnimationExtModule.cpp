@@ -660,10 +660,10 @@ void FUECPAnimationExtModule::StartupModule()
 		Meta(TEXT("get_ik_rig_summary"),         TEXT("Inspect an IK Rig (CALL FIRST)."), TEXT("asset_path"));
 		Meta(TEXT("remove_ik_goal"),             TEXT("Remove an IK goal."), TEXT("asset_path, goal_name"));
 		Meta(TEXT("remove_retarget_chain"),      TEXT("Remove a retarget chain."), TEXT("asset_path, chain_name"));
-		Meta(TEXT("map_retarget_chain"),         TEXT("Map source->target chain (or auto_map=true)."), TEXT("retargeter_path, source_chain?, target_chain?, auto_map?"));
-		Meta(TEXT("get_retargeter_summary"),     TEXT("Inspect an IK Retargeter."), TEXT("retargeter_path"));
-		Meta(TEXT("set_retarget_chain_settings"),TEXT("Set per-chain FK/IK retarget settings."), TEXT("retargeter_path, chain_name, fk_translation_mode?, fk_rotation_mode?, ik_enable?, ik_blend_to_source?, ..."));
-		Meta(TEXT("set_retarget_root_settings"), TEXT("Set retarget root settings (alphas/scale/affect_ik)."), TEXT("retargeter_path, rotation_alpha?, translation_alpha?, scale_vertical?, affect_ik_vertical?, ..."));
+		Meta(TEXT("map_retarget_chain"),         TEXT("Map source->target chain, or auto_map=true (exact names by default; fuzzy can map toes to fingers). Returns unmapped_target_chains."), TEXT("retargeter_path, source_chain?, target_chain?, auto_map?, map_type?=exact|fuzzy, force_remap?=false"));
+		Meta(TEXT("get_retargeter_summary"),     TEXT("Inspect an IK Retargeter: op stack, chain mappings, unmapped target chains."), TEXT("retargeter_path"));
+		Meta(TEXT("set_retarget_chain_settings"),TEXT("Set per-chain settings on the FK/IK chain ops. ik_* needs an IK Chains op; check skipped[]."), TEXT("retargeter_path, chain_name, fk_translation_mode?, fk_rotation_mode?, fk_translation_alpha?, fk_rotation_alpha?, fk_enable?, ik_enable?, ik_blend_to_source?, ik_extension?, ik_scale_vertical?"));
+		Meta(TEXT("set_retarget_root_settings"), TEXT("Set the Pelvis Motion op settings (alphas/scale/affect_ik)."), TEXT("retargeter_path, rotation_alpha?, translation_alpha?, scale_vertical?, affect_ik_vertical?, ..."));
 		Meta(TEXT("set_retarget_pose"),          TEXT("Create/switch a retarget pose for a side."), TEXT("retargeter_path, pose_name, side"));
 		Meta(TEXT("auto_align_retarget_pose"),   TEXT("Auto-align a side's bones to source orientations (run first)."), TEXT("retargeter_path, side"));
 		Meta(TEXT("edit_retarget_pose_bone"),    TEXT("Edit a bone in the current pose (batch via bones=[])."), TEXT("retargeter_path, bone_name, side, rotation"));
@@ -671,7 +671,7 @@ void FUECPAnimationExtModule::StartupModule()
 		Meta(TEXT("export_retarget_animation"),  TEXT("Batch-retarget animations through the retargeter."), TEXT("retargeter_path, source_mesh, target_mesh, animation_paths, prefix?, suffix?"));
 
 		// Composite template — full source->target retarget pipeline in one call; every sub-step in steps[] (unresolved chains are 'skipped', not fatal).
-		Meta(TEXT("retarget_setup"),             TEXT("TEMPLATE: IK Rig per mesh (retarget root pelvis/hips + humanoid chains Root/Spine/Neck/Head/Clavicle/Arm/Leg[/fingers] by bone-name heuristics), IK Retargeter, auto chain mapping, auto-align target pose, then export each animation into output_folder (suffix defaults to _<TargetMesh>)."), TEXT("source_mesh_path, target_mesh_path, output_folder, animations?[], retargeter_name?, source_rig_name?, target_rig_name?, auto_map?=true, auto_align?=true, include_fingers?=false, prefix?, suffix?, animation_output_folder?"));
+		Meta(TEXT("retarget_setup"),             TEXT("TEMPLATE: IK Rig per mesh (Epic skeleton template when the mesh matches one, including fingers and foot chains; else humanoid chains by bone-name heuristics), IK Retargeter with the default op stack, exact chain mapping, auto-align target pose, root motion and ik_* bone pinning, then export each animation into output_folder (suffix defaults to _<TargetMesh>). The IK pass stays off, as in Epic's auto-retarget, unless auto_fbik=true."), TEXT("source_mesh_path, target_mesh_path, output_folder, animations?[], retargeter_name?, source_rig_name?, target_rig_name?, auto_map?=true, auto_align?=true, include_fingers?=true, auto_fbik?=false, prefix?, suffix?, animation_output_folder?"));
 	}
 
 	{
@@ -706,7 +706,7 @@ void FUECPAnimationExtModule::StartupModule()
 		const auto Meta = [&D, &U](const TCHAR* Action, const TCHAR* Summary, const TCHAR* Params)
 		{ D.RegisterToolMetadata({ FName(Action), U, FString(Summary), FString(Params) }); };
 
-		Meta(TEXT("add_chooser_column"),           TEXT("Add a column (float_range|output_object|bool|enum|gameplay_tag|...)."), TEXT("chooser_path, column_type, label?"));
+		Meta(TEXT("add_chooser_column"),           TEXT("Add a column sized to the existing rows (float_range|float_distance|bool|enum|multi_enum|name|gameplay_tag|gameplay_tag_query|object|object_class|randomize|output_*|pose_match)."), TEXT("chooser_path, column_type, label?"));
 		Meta(TEXT("add_chooser_row"),              TEXT("Add a row bound to an asset."), TEXT("chooser_path, asset_path"));
 		Meta(TEXT("get_chooser_summary"),          TEXT("Inspect a chooser table (CALL FIRST)."), TEXT("chooser_path"));
 		Meta(TEXT("set_chooser_row_value"),        TEXT("Set a cell value (float_range: Min/Max; bool: Value)."), TEXT("chooser_path, column_index, row_index, property_name, property_value"));

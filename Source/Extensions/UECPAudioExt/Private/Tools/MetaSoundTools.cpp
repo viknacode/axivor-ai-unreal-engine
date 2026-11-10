@@ -12,6 +12,7 @@
 #include "MetasoundDocumentInterface.h"
 #include "MetasoundFrontendDocument.h"
 #include "MetasoundFrontendRegistryContainer.h"
+#include "MetasoundFrontendSearchEngine.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EditorAssetLibrary.h"
@@ -511,29 +512,23 @@ void HandleDisconnectMetaSoundNodes(const FString& AssetPath,
 void HandleListMetaSoundNodeTypes(const FString& Filter, FString& OutJsonString, FString& OutError)
 {
 
-	FMetasoundFrontendRegistryContainer* Registry = FMetasoundFrontendRegistryContainer::Get();
-	if (!Registry)
-	{
-		OutError = TEXT("MetaSound frontend registry not initialised");
-		return;
-	}
-
 	const FString FilterLower = Filter.ToLower();
 	TArray<TSharedPtr<FJsonValue>> Types;
 	const int32 MaxResults = 200;
 
-	Registry->IterateRegistry(
-		[&Types, &FilterLower, MaxResults](const FMetasoundFrontendClass& Class)
-		{
-			if (Types.Num() >= MaxResults) return;
-			const FString FullName = Class.Metadata.GetClassName().ToString();
-			if (!FilterLower.IsEmpty() && !FullName.ToLower().Contains(FilterLower)) return;
-			TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-			O->SetStringField(TEXT("class_name"), FullName);
-			O->SetNumberField(TEXT("major_version"), Class.Metadata.GetVersion().Major);
-			Types.Add(MakeShared<FJsonValueObject>(O));
-		},
-		EMetasoundFrontendClassType::External);
+	// UE 5.8+: INodeClassRegistry::IterateRegistry is internal-only; the search engine is the public query API.
+	using namespace Metasound::Frontend;
+	for (const FMetaSoundClassInfo& Info : ISearchEngine::Get().FindAllClasses(ISearchEngine::EResultVersion::Highest))
+	{
+		if (Types.Num() >= MaxResults) break;
+		if (Info.ClassType != EMetasoundFrontendClassType::External) continue;
+		const FString FullName = Info.ClassName.ToString();
+		if (!FilterLower.IsEmpty() && !FullName.ToLower().Contains(FilterLower)) continue;
+		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+		O->SetStringField(TEXT("class_name"), FullName);
+		O->SetNumberField(TEXT("major_version"), Info.Version.Major);
+		Types.Add(MakeShared<FJsonValueObject>(O));
+	}
 
 	TSharedPtr<FJsonObject> Res = MakeShared<FJsonObject>();
 	Res->SetBoolField(TEXT("success"), true);

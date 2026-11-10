@@ -56,7 +56,7 @@ namespace UECPChatProvider
 
 		if (Provider == TEXT("Claude"))
 		{
-			Out.ResolvedModel = Slot.ClaudeModel.IsEmpty() ? TEXT("claude-3-5-haiku-20241022") : Slot.ClaudeModel;
+			Out.ResolvedModel = Slot.ClaudeModel.IsEmpty() ? TEXT("claude-sonnet-5-5") : Slot.ClaudeModel;
 			Out.Endpoint      = FHttpCommunicationManager::DefaultClaudeUrl;
 			Out.Headers.Add(TEXT("x-api-key"), ApiKey);
 			Out.Headers.Add(TEXT("anthropic-version"), TEXT("2023-06-01"));
@@ -123,14 +123,19 @@ namespace UECPChatProvider
 			}
 		}
 
-		// Claude: content[0].text
+		// Claude may return reasoning before text, and multiple text blocks.
 		const TArray<TSharedPtr<FJsonValue>>* Content = nullptr;
-		if (Response->TryGetArrayField(TEXT("content"), Content) && Content && Content->Num() > 0)
+		if (Response->TryGetArrayField(TEXT("content"), Content) && Content)
 		{
-			if (TSharedPtr<FJsonObject> First = (*Content)[0]->AsObject())
+			FString Text;
+			for (const TSharedPtr<FJsonValue>& Value : *Content)
 			{
-				if (First->TryGetStringField(TEXT("text"), OutText) && !OutText.IsEmpty()) return true;
+				const TSharedPtr<FJsonObject> Block = Value.IsValid() ? Value->AsObject() : nullptr;
+				FString Type, Fragment;
+				if (Block.IsValid() && Block->TryGetStringField(TEXT("type"), Type) && Type == TEXT("text")
+					&& Block->TryGetStringField(TEXT("text"), Fragment)) Text += Fragment;
 			}
+			if (!Text.IsEmpty()) { OutText = MoveTemp(Text); return true; }
 		}
 
 		// OpenAI / Custom: choices[0].message.content

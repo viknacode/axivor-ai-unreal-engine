@@ -67,6 +67,12 @@ TArray<FString> FProviderConfigManager::GetModelsForProvider(const FString& Prov
 			TArray<FString> Out;
 			for (const FProviderModel& M : P.Models)
 				Out.Add(M.Id);
+			if (ProviderId.Equals(TEXT("claude"), ESearchCase::IgnoreCase))
+			{
+				for (const FProviderInfo& Bundled : GetHardcodedProviders())
+					if (Bundled.ProviderId == TEXT("claude"))
+						for (const FProviderModel& Model : Bundled.Models) Out.AddUnique(Model.Id);
+			}
 			return Out;
 		}
 	}
@@ -520,16 +526,26 @@ TArray<FProviderInfo> FProviderConfigManager::GetHardcodedProviders() const
 	};
 
 	Add(TEXT("claude"), TEXT("Claude (Anthropic)"),
-		TEXT("https://api.anthropic.com/v1"), TEXT("claude"), TEXT("claude-sonnet-4-6"),
+		TEXT("https://api.anthropic.com/v1"), TEXT("claude"), TEXT("claude-sonnet-5-5"),
 		{
+			{TEXT("claude-sonnet-5-5"), TEXT("Claude Sonnet 5.5")},
+			{TEXT("claude-opus-5-5"), TEXT("Claude Opus 5.5")},
+			{TEXT("claude-haiku-5-5"), TEXT("Claude Haiku 5.5")},
+			{TEXT("claude-fable-5-1"), TEXT("Claude Fable 5.1")},
 			{TEXT("claude-opus-4-6"),          TEXT("Claude Opus 4.6")},
 			{TEXT("claude-sonnet-4-6"),         TEXT("Claude Sonnet 4.6")},
 			{TEXT("claude-haiku-4-5-20251001"), TEXT("Claude Haiku 4.5")},
 		}, 0);
 
 	Add(TEXT("openai"), TEXT("OpenAI"),
-		TEXT("https://api.openai.com/v1/chat/completions"), TEXT("openai"), TEXT("gpt-5.4"),
+		TEXT("https://api.openai.com/v1/chat/completions"), TEXT("openai"), TEXT("gpt-5.5"),
 		{
+			{TEXT("gpt-5.5"),      TEXT("GPT-5.5")},
+			{TEXT("gpt-5.5-pro"),  TEXT("GPT-5.5 Pro")},
+			{TEXT("gpt-6-astra"),  TEXT("GPT-6 Astra")},
+			{TEXT("gpt-6-sol"),    TEXT("GPT-6 Sol")},
+			{TEXT("gpt-6-luna"),   TEXT("GPT-6 Luna")},
+			{TEXT("gpt-6"),        TEXT("GPT-6")},
 			{TEXT("gpt-5.4"),      TEXT("GPT-5.4")},
 			{TEXT("gpt-5.4-mini"), TEXT("GPT-5.4 Mini")},
 			{TEXT("gpt-5.4-nano"), TEXT("GPT-5.4 Nano")},
@@ -537,16 +553,30 @@ TArray<FProviderInfo> FProviderConfigManager::GetHardcodedProviders() const
 			{TEXT("gpt-4.1"),      TEXT("GPT-4.1")},
 			{TEXT("gpt-4.1-mini"), TEXT("GPT-4.1 Mini")},
 			{TEXT("o3"),           TEXT("o3")},
+			{TEXT("o3-pro"),       TEXT("o3-pro")},
+			{TEXT("o3-mini"),      TEXT("o3-mini")},
 			{TEXT("o4-mini"),      TEXT("o4-mini")},
+			{TEXT("o1"),           TEXT("o1")},
+			{TEXT("o1-mini"),      TEXT("o1-mini")},
+			{TEXT("gpt-4o"),       TEXT("GPT-4o")},
+			{TEXT("gpt-4o-mini"),  TEXT("GPT-4o Mini")},
 		}, 1);
 
 	Add(TEXT("gemini"), TEXT("Google Gemini"),
 		TEXT("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"),
-		TEXT("gemini"), TEXT("gemini-2.5-flash"),
+		TEXT("gemini"), TEXT("gemini-3.8-flash"),
 		{
+			{TEXT("gemini-3.8-flash"),              TEXT("Gemini 3.8 Flash")},
+			{TEXT("gemini-3.7-flash"),              TEXT("Gemini 3.7 Flash")},
+			{TEXT("gemini-3.6-flash"),              TEXT("Gemini 3.6 Flash")},
+			{TEXT("gemini-3.1-pro"),                TEXT("Gemini 3.1 Pro")},
 			{TEXT("gemini-2.5-flash"),              TEXT("Gemini 2.5 Flash")},
 			{TEXT("gemini-2.5-pro"),                TEXT("Gemini 2.5 Pro")},
 			{TEXT("gemini-2.5-flash-lite"),         TEXT("Gemini 2.5 Flash Lite")},
+			{TEXT("gemini-2.0-flash"),              TEXT("Gemini 2.0 Flash")},
+			{TEXT("gemini-2.0-pro-exp"),            TEXT("Gemini 2.0 Pro Experimental")},
+			{TEXT("gemini-1.5-pro"),                TEXT("Gemini 1.5 Pro")},
+			{TEXT("gemini-1.5-flash"),              TEXT("Gemini 1.5 Flash")},
 			{TEXT("gemini-3-flash-preview"),        TEXT("Gemini 3 Flash Preview")},
 			{TEXT("gemini-3-pro-preview"),          TEXT("Gemini 3 Pro Preview")},
 			{TEXT("gemini-3.1-pro-preview"),        TEXT("Gemini 3.1 Pro Preview")},
@@ -590,8 +620,10 @@ TArray<FAgentInfo> FProviderConfigManager::GetHardcodedAgents() const
 			{TEXT("claude-haiku-4-5-20251001"), TEXT("Claude Haiku 4.5")},
 		});
 
-	Add(TEXT("codex"), TEXT("Codex"), TEXT("gpt-5.4"),
+	Add(TEXT("codex"), TEXT("Codex"), TEXT("gpt-6-astra"),
 		{
+			{TEXT("gpt-6-astra"),  TEXT("GPT-6 Astra")},
+			{TEXT("gpt-6"),        TEXT("GPT-6")},
 			{TEXT("gpt-5.4"),      TEXT("GPT-5.4")},
 			{TEXT("gpt-5.4-mini"), TEXT("GPT-5.4 Mini")},
 			{TEXT("o3"),           TEXT("o3")},
@@ -604,11 +636,47 @@ TArray<FAgentInfo> FProviderConfigManager::GetHardcodedAgents() const
 			{TEXT("gpt-5.4"),           TEXT("GPT-5.4")},
 		});
 
-	Add(TEXT("gemini"), TEXT("Gemini Agent"), TEXT("gemini-2.5-pro"),
+	Add(TEXT("gemini"), TEXT("Gemini Agent"), TEXT("gemini-3.8-flash"),
 		{
+			{TEXT("gemini-3.8-flash"),     TEXT("Gemini 3.8 Flash")},
+			{TEXT("gemini-3.7-flash"),     TEXT("Gemini 3.7 Flash")},
+			{TEXT("gemini-3.6-flash"),     TEXT("Gemini 3.6 Flash")},
+			{TEXT("gemini-3.1-pro"),       TEXT("Gemini 3.1 Pro")},
 			{TEXT("gemini-2.5-pro"),       TEXT("Gemini 2.5 Pro")},
 			{TEXT("gemini-2.5-flash"),     TEXT("Gemini 2.5 Flash")},
-			{TEXT("gemini-3-pro-preview"), TEXT("Gemini 3 Pro Preview")},
+			{TEXT("gemini-2.0-flash"),     TEXT("Gemini 2.0 Flash")},
+		});
+
+	Add(TEXT("antigravity"), TEXT("Google Antigravity"), TEXT("gemini-3.8-flash-high"),
+		{
+			{TEXT("gemini-3.8-flash-high"),   TEXT("Gemini 3.8 Flash (High)")},
+			{TEXT("gemini-3.8-flash-medium"), TEXT("Gemini 3.8 Flash (Medium)")},
+			{TEXT("gemini-3.8-flash-low"),    TEXT("Gemini 3.8 Flash (Low)")},
+			{TEXT("gemini-3.7-flash-high"),   TEXT("Gemini 3.7 Flash (High)")},
+			{TEXT("gemini-3.7-flash-medium"), TEXT("Gemini 3.7 Flash (Medium)")},
+			{TEXT("gemini-3.7-flash-low"),    TEXT("Gemini 3.7 Flash (Low)")},
+			{TEXT("gemini-3.6-flash-high"),   TEXT("Gemini 3.6 Flash (High)")},
+			{TEXT("gemini-3.6-flash-medium"), TEXT("Gemini 3.6 Flash (Medium)")},
+			{TEXT("gemini-3.1-pro-high"),     TEXT("Gemini 3.1 Pro (High)")},
+			{TEXT("gemini-3.1-pro-low"),      TEXT("Gemini 3.1 Pro (Low)")},
+			{TEXT("gemini-2.5-pro"),          TEXT("Gemini 2.5 Pro")},
+			{TEXT("gemini-2.5-flash"),        TEXT("Gemini 2.5 Flash")},
+		});
+
+	Add(TEXT("antigravity-acp"), TEXT("Google Antigravity"), TEXT("gemini-3.8-flash-high"),
+		{
+			{TEXT("gemini-3.8-flash-high"),   TEXT("Gemini 3.8 Flash (High)")},
+			{TEXT("gemini-3.8-flash-medium"), TEXT("Gemini 3.8 Flash (Medium)")},
+			{TEXT("gemini-3.8-flash-low"),    TEXT("Gemini 3.8 Flash (Low)")},
+			{TEXT("gemini-3.7-flash-high"),   TEXT("Gemini 3.7 Flash (High)")},
+			{TEXT("gemini-3.7-flash-medium"), TEXT("Gemini 3.7 Flash (Medium)")},
+			{TEXT("gemini-3.7-flash-low"),    TEXT("Gemini 3.7 Flash (Low)")},
+			{TEXT("gemini-3.6-flash-high"),   TEXT("Gemini 3.6 Flash (High)")},
+			{TEXT("gemini-3.6-flash-medium"), TEXT("Gemini 3.6 Flash (Medium)")},
+			{TEXT("gemini-3.1-pro-high"),     TEXT("Gemini 3.1 Pro (High)")},
+			{TEXT("gemini-3.1-pro-low"),      TEXT("Gemini 3.1 Pro (Low)")},
+			{TEXT("gemini-2.5-pro"),          TEXT("Gemini 2.5 Pro")},
+			{TEXT("gemini-2.5-flash"),        TEXT("Gemini 2.5 Flash")},
 		});
 
 	return Out;

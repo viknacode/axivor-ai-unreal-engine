@@ -1384,7 +1384,7 @@ void HandleGetClothConfigFromArgs(const TSharedPtr<FJsonObject>& Args, FString& 
 
 	TArray<TSharedPtr<FJsonValue>> ConfigsArr;
 	TArray<UObject*> SubObjects;
-	GetObjectsWithOuter(ClothAsset, SubObjects, false);
+	GetObjectsWithOuter(ClothAsset, SubObjects, EGetObjectsFlags::None);
 	for (UObject* Obj : SubObjects)
 	{
 		if (!IsValid(Obj)) continue;
@@ -1450,7 +1450,7 @@ void HandleSetClothConfigFromArgs(const TSharedPtr<FJsonObject>& Args, FString& 
 
 	bool bFound = false;
 	TArray<UObject*> SubObjects;
-	GetObjectsWithOuter(ClothAsset, SubObjects, false);
+	GetObjectsWithOuter(ClothAsset, SubObjects, EGetObjectsFlags::None);
 	for (UObject* Obj : SubObjects)
 	{
 		if (!IsValid(Obj)) continue;

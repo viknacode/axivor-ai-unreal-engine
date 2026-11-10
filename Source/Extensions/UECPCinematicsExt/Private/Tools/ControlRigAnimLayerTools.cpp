@@ -1,6 +1,7 @@
 // Copyright 2026, BlueprintsLab, All rights reserved.
 
 #include "Tools/ControlRigAnimLayerTools.h"
+#include "ControlRigAssetReference.h"
 #include "Misc/EngineVersionComparison.h"
 
 #if !UE_VERSION_OLDER_THAN(5, 5, 0)
@@ -241,8 +242,8 @@ void HandleBakeToControlRigFromArgs(const TSharedPtr<FJsonObject>& Args, FString
 	UWorld* World = GetEditorWorld(OutError); if (!World) return;
 
 	FMovieSceneBindingProxy Proxy(Guid, Seq);
-	const bool bOk = UControlRigSequencerEditorLibrary::BakeToControlRig(
-		World, Seq, RigClass,  nullptr,
+	const bool bOk = UControlRigSequencerEditorLibrary::BakeToControlRigFromReference(
+		World, Seq, FControlRigAssetStrongReference(TSubclassOf<UControlRig>(RigClass)),  nullptr,
 		bReduceKeys, static_cast<float>(Tolerance), Proxy);
 
 	TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();

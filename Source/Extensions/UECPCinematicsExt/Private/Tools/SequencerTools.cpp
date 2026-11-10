@@ -1,6 +1,7 @@
 // Copyright 2026, BlueprintsLab, All rights reserved.
 
 #include "Tools/SequencerTools.h"
+#include "ControlRigAssetReference.h"
 #include "Misc/EngineVersionComparison.h"
 #include "Managers/SettingsManager.h"
 #include "Managers/EditorProfileSync.h"
@@ -1278,7 +1279,7 @@ void HandleAddControlRigSequencerTrack(const FString& SequencePath, const FStrin
 	if (!World) { OutError = TEXT("No editor world"); return; }
 
 	FMovieSceneBindingProxy Proxy(Binding, Seq);
-	UMovieSceneTrack* Track = UControlRigSequencerEditorLibrary::FindOrCreateControlRigTrack(World, Seq, CRClass, Proxy, false);
+	UMovieSceneTrack* Track = UControlRigSequencerEditorLibrary::FindOrCreateControlRigTrackFromReference(World, Seq, FControlRigAssetStrongReference(TSubclassOf<UControlRig>(CRClass)), Proxy, false);
 	if (!Track) { OutError = FString::Printf(TEXT("Failed to create Control Rig track for binding '%s'"), *BindingLabel); return; }
 
 	UMovieSceneControlRigParameterTrack* CRTrack = Cast<UMovieSceneControlRigParameterTrack>(Track);
@@ -1318,8 +1319,8 @@ void HandleListControlRigControls(const FString& SequencePath, const FString& Bi
 		if (!E) continue;
 		TSharedPtr<FJsonObject> Obj = MakeShareable(new FJsonObject);
 		Obj->SetStringField(TEXT("name"), E->GetKey().Name.ToString());
-		Obj->SetStringField(TEXT("control_type"), ControlTypeToString(E->Settings.ControlType));
-		Obj->SetBoolField(TEXT("animatable"), E->Settings.AnimationType == ERigControlAnimationType::AnimationControl);
+		Obj->SetStringField(TEXT("control_type"), ControlTypeToString(Hier->MakeControlSettings(E).ControlType));
+		Obj->SetBoolField(TEXT("animatable"), Hier->MakeControlSettings(E).AnimationType == ERigControlAnimationType::AnimationControl);
 		Controls.Add(MakeShareable(new FJsonValueObject(Obj)));
 	}
 
